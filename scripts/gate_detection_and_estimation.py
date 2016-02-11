@@ -121,9 +121,27 @@ def jacobianB(X,U):
                     [0,0,0,0,0,-1]] )
  
 '''
+'''
+def gatePoseDynamics(X,U,dt=1,noise=False):
+    v = U[:3].reshape(3,1)
+    x = X[:3].reshape(3,1)
+    dc = x / (x**2).sum()**0.5
+    R = np.array([ [dc[0],dc[1],0], [-dc[1],dc[0],0], [0, 0 ,1] ] )
+    x = x - np.dot(R, v) * dt
+    return x
 
+def jacobianA(X,U):
+    return np.zeros((3,3), float)
+
+def jacobianB(X,U):
+    x = X[:3].reshape(3,1)
+    dc = x /(x**2).sum()**0.5
+    R = - np.array([ [dc[0],dc[1],0], [-dc[1],dc[0],0], [0, 0 ,1] ] )
+    return R
+'''
+    
 # A,B,C,Q,R
-A = np.zeros((3, 3), float)
+A = np.zeros((3,3), float)
 B = -np.eye(3, dtype='float')
 C = np.eye(3, dtype='float')      
 Q = np.zeros((3, 3), float)
@@ -134,10 +152,10 @@ R = np.zeros((C.shape[0], C.shape[0]), float)
 np.fill_diagonal(R, SENSOR_NOISE)
 
 # Initial Estimate
-X0 = np.zeros((3,1))
+X0 = np.ones((3,1))
 
 # Instantiate KF
-#KF = ExtendedKalmanFilter(gatePoseDynamics, jacobianA, jacobianB, C, Q, R, X0, dt=1.0/LOOP_FREQ)
+#EKF = ExtendedKalmanFilter(gatePoseDynamics, jacobianA, jacobianB, C, Q, R, X0, dt=1.0/LOOP_FREQ)
 KF = KalmanFilter(A,B,C,Q,R,X0,dt=0.1)
 
 # Heading estimator
@@ -426,7 +444,7 @@ if __name__ == '__main__':
             mva_tvec = translationFilter.update(raw_tvec)
             
             Y = mva_tvec.reshape((3,1))
-            U = np.matmul( tfs.rotation_matrix(gateHeading, (0,0,1))[:3,:3], drone_linear_vel.reshape((3,1)) )
+            U = np.matmul(tfs.rotation_matrix(gateHeading, (0,0,1))[:3,:3], drone_linear_vel.reshape((3,1)))
             KF.dt = (time() - start)
             KF.filter(U,Y)
             X = KF.X.copy()

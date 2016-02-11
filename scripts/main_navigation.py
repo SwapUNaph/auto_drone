@@ -480,7 +480,7 @@ def callback_visual_gate_detection_changed(data):
         gate_proj = np.matmul(R_body2track, meas_vec)
         pos_calc = gate_pos - gate_proj
 
-
+	# gate_pos_wrt_ground = drone_pos_wrt_gorund + drone_orientation_matrix.inverse() * gate_pos_wrt_drone
         gate_log.append(pos_calc)
 
     
@@ -662,7 +662,7 @@ def update_pose_estimate():
     # if nav_active == 'point' or  nav_active == 'off':
     #     if bebop_last_known_pos is not None:
     bebop_model.propagate(1.0/loop_rate)
-	
+    
     temp_pose = bebop_model.get_drone_pose()
     temp_odom = Odometry()
     temp_odom.pose.pose = temp_pose
@@ -670,7 +670,7 @@ def update_pose_estimate():
     publisher_model.publish(temp_pose)
     # publisher_model_odom.publish(temp_odom)
     
-	# calculate distance from WP
+    # calculate distance from WP
     navigation_distance = calculate_distance()
     rospy.loginfo("navigation distance")
     rospy.loginfo(navigation_distance)
@@ -860,7 +860,7 @@ if __name__ == '__main__':
     # Variables
     autonomy_active = False                                     # autonomous mode is active
     
-    start_pos = np.array([-.7, 5, 0])
+    start_pos = np.array([-.5, 5, 0])
     start_hdg = -np.pi/2
     # start_pos = np.array([0.0, 0.0, 0.0])
     # start_hdg = 0.0
@@ -883,7 +883,7 @@ if __name__ == '__main__':
     current_gate = None
     gate_log = None                                             # Filtered gate input from gate detection
     gate_detected = False
-    gate_gain_comp_filter = .1                                  # input of the gate to the complementary filter
+    gate_gain_comp_filter = 0.1                                  # input of the gate to the complementary filter
     last_pos = None
 
     bebop_last_odom_time = None                                 # Time log of the last bebop_odom data
@@ -917,8 +917,8 @@ if __name__ == '__main__':
     gate_nav_des_vel_nrm = 1.0
 
 
-    nav_limit_z = .2                                            # Z command limit
-    nav_limit_r = .8                                            # R command limit
+    nav_limit_z = 0.2                                            # Z command limit
+    nav_limit_r = 0.8                                            # R command limit
     
     nav_drag = 0.0                                              # Drag acceleration term
 
@@ -926,7 +926,7 @@ if __name__ == '__main__':
     dist_gate_blind = 1.0                                       # how exact go to blind wp before advancing state
     dist_gate_close = 1.5                                       # how close to gate before advancing state (approach)
     dist_exit_gate_wp = 20.0                                    # how far away is the exit waypoint
-    exit_thrs = dist_exit_gate_wp - .75                         # how far behind the gate is it considered passed
+    exit_thrs = dist_exit_gate_wp - 0.75                         # how far behind the gate is it considered passed
 
 
     # Publishers
