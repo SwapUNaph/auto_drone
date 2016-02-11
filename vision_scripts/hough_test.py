@@ -222,7 +222,7 @@ def function(img,gate_pnts):
 	# print 'Left_sum: ',left_sum
 
 	left_sum = left_sum / (left_sum+right_sum)
-	right_sum = right_sum / (left_sum+right_sum)
+	right_sum = 1 - left_sum
 
 
 	# return img_R, img_L
