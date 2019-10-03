@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!--
+<author>Swapneel Naphade</author>
+<email>snaphade@umd.edu</email>
+<version>2.0</version>
+-->
+
+<launch>
+	
+   <!-- BGR Image publisher -->
+   <node pkg="auto_drone" type="color_tuner.py" name="color_tuner" output='screen'/>
+
+  <!-- Open image viewer -->
+  <node pkg="image_view" type="image_view" name="image_view" args="image:=/camera_tuner_image"/>
+   
+</launch>

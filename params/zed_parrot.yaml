@@ -1,0 +1,2 @@
+# To start simulation make simulation parameter 'true'
+simulation: false

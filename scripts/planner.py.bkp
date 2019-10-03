@@ -1,0 +1,137 @@
+#!/usr/bin/python
+'''
+Program description: The planner takes in the current pose of the drone
+					 from pose estimator, plans the trajectory, calculates 
+					 the error in pose and sends the pose error to the
+					 controller.				 
+Author: Swapneel Naphade (snaphade@umd.edu)
+version: 1.0
+Date: 6/12/19
+Change log: 
+
+'''
+
+import rospy
+import signal
+import sys
+from geometry_msgs.msg import Twist, Pose, Quaternion
+from nav_msgs.msg import Odometry
+import transformations as tfs
+from common_resources import qv_mult
+import numpy as np
+
+drone_pose = Pose()
+drone_vel = Twist()
+target_pose = Pose()
+target_pose.orientation.w = 1 
+target_pose.position.z = 1
+START = False
+CURR_POSE = 0
+
+
+def signal_handler(_, __):
+    # enable Ctrl+C of the script
+    sys.exit(0)
+
+def pose(X,Y,Z,w,x,y,z):
+	p = Pose()
+	p.position.x = X
+	p.position.y = Y
+	p.position.z = Z
+	p.orientation.w = w
+	p.orientation.x = x
+	p.orientation.y = y
+	p.orientation.z = z
+	return p
+
+path = [pose(0,0,1.5,1,0,0,0), pose(5,0.75,1.5,1,0,0,0), pose(10,0.75,1.5,1,0,0,0), pose(10,0.75,1.5,0.707,0,0,0.707), pose(10,2.5,1.5,0.707,0,0,0.707), pose(5,2.5,1.5,0,0,0,1), pose(0,0,1.5,0,0,0,1)]
+
+
+def orientation2array(orientation):
+	return np.array([orientation.x, orientation.y, orientation.z, orientation.w])
+	
+
+def drone_pose_callback(drone_odom):
+	global drone_pose
+	global drone_vel
+	drone_pose = drone_odom.pose.pose
+	drone_vel = drone_odom.twist.twist
+	#rospy.loginfo("[Drone pose: {}]".format(drone_pose))
+	
+	
+def target_callback(pose):
+	'''
+	This function gets the target position from target_pose topic and saves it.
+	'''
+	global target_pose, START
+	target_pose = pose
+	#rospy.loginfo("[Target pose: {}]".format(target_pose))
+	#START = ~START
+	
+	
+	
+def pub_pose_error():
+	global CURR_POSE, target_pose
+		
+	pose_error = Pose()
+	ground_x_error = target_pose.position.x - drone_pose.position.x
+	ground_y_error = target_pose.position.y - drone_pose.position.y
+	ground_z_error = target_pose.position.z - drone_pose.position.z
+	ground_linear_error = np.array([ground_x_error, ground_y_error, ground_z_error])
+	
+	if START:
+		target_pose = path[CURR_POSE]
+		if np.linalg.norm(ground_linear_error) < 0.01 and CURR_POSE < len(path)-1:
+			CURR_POSE = CURR_POSE + 1
+	
+	target_orient_arr = orientation2array(target_pose.orientation)
+	drone_orient_arr = orientation2array(drone_pose.orientation)
+
+	#rospy.loginfo("Target orientation array: {}".format(target_orient_arr) )
+	#rospy.loginfo("Drone orientation array: {}".format(drone_orient_arr) )
+	
+	pose_error_orient_arr = tfs.quaternion_multiply( target_orient_arr , tfs.quaternion_conjugate(drone_orient_arr) )
+	#rospy.loginfo("Error orientation array: {}".format(pose_error_orient_arr) )
+	
+	body_linear_error = qv_mult(tfs.quaternion_conjugate(drone_orient_arr), ground_linear_error)
+	
+	pose_error.position.x = body_linear_error[0]
+	pose_error.position.y = body_linear_error[1]
+	pose_error.position.z = body_linear_error[2]
+	pose_error.orientation.w = pose_error_orient_arr[3]
+	pose_error.orientation.x = pose_error_orient_arr[0]
+	pose_error.orientation.y = pose_error_orient_arr[1]
+	pose_error.orientation.z = pose_error_orient_arr[2]
+	
+	#rospy.loginfo("Pose error: {}".format(pose_error))
+	pose_error_publisher.publish(pose_error)
+
+	
+if __name__ == '__main__':
+	
+	signal.signal(signal.SIGINT, signal_handler)
+	# Initialize node
+	rospy.init_node('planner', anonymous=False)
+	
+	# Subcribers
+	# state subscription
+	# drone odometry subscription
+	rospy.Subscriber('/ground_truth/state', Odometry, drone_pose_callback)
+	
+	# target pose subscription
+	rospy.Subscriber('/pose_target', Pose, target_callback)
+	
+	
+	# Publishers
+	# pose_error publication
+	pose_error_publisher = rospy.Publisher('/pose_error', Pose, queue_size=5)
+	
+	# Update rate for the control loop
+	rate = rospy.Rate(50) # 50 hz
+	
+	
+	while not rospy.is_shutdown():
+		pub_pose_error()		
+		rate.sleep()
+	
+	
