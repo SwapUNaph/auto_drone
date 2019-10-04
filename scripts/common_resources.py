@@ -9,9 +9,25 @@
 
 import math
 from tf import transformations as tfs
-from geometry_msgs.msg import Twist, Pose, Quaternion
+from geometry_msgs.msg import Twist, Pose, Quaternion, Point
 from auto_drone.msg import WP_msg, Drone_Pose
 import numpy as np
+
+# Convert WP_Msg to array
+def WP2array(wp):
+    return (np.array([wp.pos.x, wp.pos.y, wp.pos.z]), float(wp.hdg), str(wp.format))
+    
+# Convert arrays to WP_Msg
+def array2WP(pos, hdg, formt):
+    wp = WP_Msg()
+    point = Point()
+    point.x = pos[0]
+    point.y = pos[1]
+    point.z = pos[2]
+    wp.pos = point
+    wp.hdg = float(hdg)
+    wp.format = str(formt)
+    return wp
 
 # Convert Pose to a tuple of numpy array (position, orientation)
 def pose2array(pose):
