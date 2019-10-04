@@ -63,8 +63,6 @@ zRb = tfs.euler_matrix(-math.pi / 2, 0, -math.pi / 2, 'rzyx')
 cam_q = tfs.quaternion_from_matrix(zRb)
 zRb = zRb[:3, :3]
 
-# how fast do scripts run (I think this is never used)
-frequency = 5
 
 # Convert quaternion to euler angles (angles in radians)
 def quat2euler(q):
@@ -167,14 +165,6 @@ def limit_value(value, limit):
         return value
 
 
-# calculate rotation periods from angles and timestamps
-def calculate_periods(input_data):
-    angles = np.unwrap(input_data[1, :])
-    times = input_data[0, :]
-    d_a = np.diff(angles)
-    d_t = np.diff(times)
-    return 2*math.pi * d_t / d_a
-
 # Kalman Filter
 class KalmanFilter:
   
@@ -263,18 +253,99 @@ class WP:
         return str(list(self.pos) + [self.hdg])
 
 
-# this is the data that is required to pass dynamic gate
-class OpenloopData:
-    def __init__(self):
-        self.timer = None
-        self.period = None
-        self.theta = None
-        self.time_taken_to_gate = 2.0
-        self.std_dev = None
 
-        self.rotate_perform = False
-        self.counter = 0
-        self.triggered = False
+class Bebop_Model:
+    def __init__(self,pos,hdg):
+        self.pos = np.array(pos) # global position
+        self.vel = np.array([0,0,0]) # global velocity
+        self.att = np.array([0,0,0]) # roll pitch yaw, FRD
+        self.cmd_att = np.array([0,0,0,0]) # roll pitch yaw, FRD
+        
+        self.max_tilt = 40*math.pi/180
+        self.roll_rate = 1.5*math.pi
+        self.yaw_rate = .8*math.pi
+        self.climb_rate = .3
+        self.drag_term = .25
+        
+        self.pose = Pose()
+        
+    def propagate(self,t):
+        y_accel = limit_value(9.81*atan(self.att[0]),self.max_tilt)
+        x_accel = limit_value(9.81*atan(-self.att[1]),self.max_tilt)
+        yaw = self.att[2]
+
+
+
+        accel = np.array([x_accel*cos(yaw)-y_accel*sin(yaw), y_accel*sin(yaw)+x_accel*sin(yaw), self.cmd_att[2]*self.climb_rate])
+        accel = accel - self.drag_term * .5 * np.array([self.vel[0]**2, self.vel[1]**2, 0])
+        self.vel = self.vel + accel * t
+        self.pos = self.pos + self.vel*t
+        
+        self.pose.position.x = self.pos[0]
+        self.pose.position.y = self.pos[1]
+        self.pose.position.z = self.pos[2]
+        
+        roll_err = self.cmd_att[0] - self.att[0]
+        pitch_err = self.cmd_att[1] - self.att[1]
+
+        if abs(roll_err) > self.roll_rate * t:
+            d_roll = np.sign(roll_err) * self.roll_rate * t
+        else:
+            d_roll = roll_err
+
+        if abs(pitch_err) > self.roll_rate * t:
+            d_pitch = np.sign(pitch_err) * self.roll_rate * t
+        else:
+            d_pitch = pitch_err
+
+        d_yaw = self.cmd_att[3] * self.yaw_rate * t
+
+
+        self.att = self.att + np.array([d_roll, d_pitch, d_yaw])
+        
+        quat = tfs.quaternion_from_euler(self.att[0],self.att[1],self.att[2])
+        self.pose.orientation.x = quat[0]
+        self.pose.orientation.y = quat[1]
+        self.pose.orientation.z = quat[2]
+        self.pose.orientation.w = quat[3]
+
+        
+
+        
+
+    
+
+    def update_odom(self,odom):
+        self.pos = np.array([odom.pose.pose.position.x,
+                             odom.pose.pose.position.y,
+                             odom.pose.pose.position.z])
+
+        quat = odom.pose.pose.orientation
+        
+        self.att = np.array(tfs.euler_from_quaternion([quat.x, quat.y, quat.z, quat.w]))
+        
+
+        hdg = -self.att[2]
+
+        vel_twist = odom.twist.twist.linear
+
+        self.vel = np.array([vel_twist.x * cos(hdg) - vel_twist.y * sin(hdg),
+                             vel_twist.y * cos(hdg) + vel_twist.x * sin(hdg), 
+                             vel_twist.z])
+        
+
+
+        self.pose = odom.pose.pose
+        
+        
+
+	    
+    def update_att(self,commands):
+        self.cmd_att[0] = self.max_tilt*commands[0]
+        self.cmd_att[1] = -self.max_tilt*commands[1]
+        self.cmd_att[2] = commands[2]
+        self.cmd_att[3] = commands[3]
+        
 
 
 # PID control loop without smoothing
@@ -405,116 +476,3 @@ class Bebop:
     MOTOR_RAMP = 7
     SENSOR_DEFECT = 8
 
-
-# everything after here is used for determining rotation speed of dynamic gate
-def fourier(data, freq, plot_freq_domain, plot_imag):
-    # Convert data to numpy arrays
-    global cur_ax, ax, nplots
-    dnp = np.array(data)
-    fnp = np.array(freq)
-    # Tally # of data points
-    L = max(np.shape(dnp))
-    # Make sure frequency is correct shape
-    if (fnp.ndim > 1 and np.shape(fnp)[1] > 1):
-        fnp = np.transpose(fnp)
-
-    # respones(freq) = 1/N SUM{k = 1 to N: data(t_k) * exp(-2*pi*j*freq*t_k)}
-    # where frequency is modulated to find peak response for freq.
-    # Create exp part of transform:
-    exp_mat = dnp[:, 0]
-    exp_mat = (-2 * math.pi * 1j) * exp_mat
-    exp_mat = np.expand_dims(exp_mat, 1)
-    fnp = np.expand_dims(fnp, 1)
-    exp_mat = fnp * np.transpose(exp_mat)
-    exp_mat = np.exp(exp_mat)
-
-    # Create data part of fourier transform:
-    source = np.cos(dnp[:, 1])
-    source = np.expand_dims(source, 1)
-
-    # Multiply the two together to get whole fourier transform
-    val = np.matmul(exp_mat, source) / L
-
-    # # Plotting
-    # freq_dom = None
-    # if (plot_freq_domain):
-    #     cur_ax += 1
-    #     ax = plt.subplot(nplots, 1, cur_ax)
-    #     freq_dom = plt.plot(freq, np.real(val))
-    # return val, freq_dom
-    return val
-
-
-# def fourier_imag_plane(data, freq):
-#     # All this is to plot fourier response in imaginary plane
-#     global cur_ax, ax, nplots
-#     dnp = np.array(data)
-#     fnp = np.array(freq)
-#     L = max(np.shape(dnp))
-#     if (fnp.ndim > 1 and np.shape(fnp)[1] > 1):
-#         fnp = np.transpose(fnp)
-#
-#     print(fnp)
-#     exp_mat = dnp[:, 0]
-#     exp_mat = (-2 * math.pi * 1j) * exp_mat
-#     exp_mat = np.expand_dims(exp_mat, 1)
-#     fnp = np.expand_dims(fnp, 1)
-#     exp_mat = fnp * np.transpose(exp_mat)
-#     exp_mat = np.exp(exp_mat)
-#     source = np.cos(dnp[:, 1])
-#     source = np.expand_dims(source, 1)
-#     val = np.transpose(exp_mat) * source
-#     valtot = np.matmul(exp_mat, source) / L
-#     cur_ax += 1
-#     ax = plt.subplot(nplots, 1, cur_ax, projection='polar')
-#     imag_plane = plt.polar(np.angle(val), np.linalg.norm(val, 2, 1))
-#     center = plt.polar(np.angle(valtot), np.linalg.norm(valtot, 2, 1), 'ro')
-#     return imag_plane
-
-
-# Find angle t seconds after last data point
-def angle_in_t_seconds(data, freq, offset, t, plot_history, plot_propagation):
-    # global cur_ax, ax, nplots
-    dnp = np.array(data)
-    t_augmented = dnp[-1, 0] + t  # time of interest with respect to original time frame
-    angle = np.mod(t_augmented * 2 * math.pi * freq + (offset - math.pi / 2) * 2 * math.pi, 2 * math.pi)
-    # print 'in ', t, ' seconds, angle is ', angle, '[rad]'
-
-    # Rest is plotting
-    # t_start = dnp[-1, 0]
-    # t_end = dnp[-1, 0]
-    # if (plot_history):
-    #     t_start = dnp[0, 0]
-    # if (plot_propagation):
-    #     t_end = dnp[-1, 0] + t
-    # print t_start, t_end, t
-    # t_range = np.linspace(t_start, t_end, ((t_end - t_start) + t) * 10)
-    # time_prop = None
-    # if (plot_history or plot_propagation):
-    #     cur_ax += 1
-    #     ax = plt.subplot(nplots, 1, cur_ax)
-    #     if (plot_history):
-    #         original = plt.plot(dnp[:, 0], dnp[:, 1])
-    #     time_prop = plt.plot(t_range,
-    #                          np.mod(t_range * 2 * math.pi * freq + (offset - math.pi / 2) * 2 * math.pi, 2 * math.pi))
-    # return angle, time_prop
-    return angle
-
-
-def extract_freq(data, resolution, plot_freq_domain, plot_imag):
-    freq_range = np.arange(0, 2 * math.pi, resolution)
-    # [response, four_plot] = fourier(data, freq_range, plot_freq_domain, plot_imag)
-    response = fourier(data, freq_range, plot_freq_domain, plot_imag)
-    real_r = np.real(response)  # Real part of response
-    imag_r = np.imag(response)  # Imaginary part of response
-    index = np.argmax(np.abs(real_r))  # index for largest real part of response
-    freq = freq_range[index]  # Frequency for largest real response
-    offset = imag_r[index]  # Offset for largest real response (phase shift to calculate future angle)
-
-    # Plotting
-    # if (plot_imag):
-    #     imag_plot = fourier_imag_plane(data, freq)
-    # # print 'arg: ', np.angle(response[index])
-    # print 'freq: ', freq * 2 * math.pi, ', offset: ', np.mod((offset - math.pi / 2) * 2 * math.pi, 2 * math.pi), '[rad]'
-    # return [freq, offset, four_plot, imag_plot]
-    return [freq, offset]

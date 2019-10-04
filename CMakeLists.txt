@@ -55,6 +55,8 @@ find_package(catkin REQUIRED COMPONENTS
 add_message_files(
    FILES
    Traj_error.msg
+   Drone_Pose_Msg.msg
+   WP_Msg.msg
  )
 
 ## Generate services in the 'srv' folder
