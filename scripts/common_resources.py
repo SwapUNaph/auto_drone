@@ -10,6 +10,7 @@
 import math
 from tf import transformations as tfs
 from geometry_msgs.msg import Twist, Pose, Quaternion
+from auto_drone.msg import WP_msg, Drone_Pose
 import numpy as np
 
 # Convert Pose to a tuple of numpy array (position, orientation)
@@ -270,13 +271,13 @@ class Bebop_Model:
         self.pose = Pose()
         
     def propagate(self,t):
-        y_accel = limit_value(9.81*atan(self.att[0]),self.max_tilt)
-        x_accel = limit_value(9.81*atan(-self.att[1]),self.max_tilt)
+        roll_accel = limit_value(9.81*atan(self.att[0]),self.max_tilt)
+        pitch_accel = limit_value(9.81*atan(-self.att[1]),self.max_tilt)
         yaw = self.att[2]
 
 
 
-        accel = np.array([x_accel*cos(yaw)-y_accel*sin(yaw), y_accel*sin(yaw)+x_accel*sin(yaw), self.cmd_att[2]*self.climb_rate])
+        accel = np.array([pitch_accel*cos(yaw)-roll_accel*sin(yaw), roll_accel*sin(yaw)+pitch_accel*sin(yaw), self.cmd_att[2]*self.climb_rate])
         accel = accel - self.drag_term * .5 * np.array([self.vel[0]**2, self.vel[1]**2, 0])
         self.vel = self.vel + accel * t
         self.pos = self.pos + self.vel*t
@@ -309,11 +310,6 @@ class Bebop_Model:
         self.pose.orientation.z = quat[2]
         self.pose.orientation.w = quat[3]
 
-        
-
-        
-
-    
 
     def update_odom(self,odom):
         self.pos = np.array([odom.pose.pose.position.x,
@@ -324,7 +320,6 @@ class Bebop_Model:
         
         self.att = np.array(tfs.euler_from_quaternion([quat.x, quat.y, quat.z, quat.w]))
         
-
         hdg = -self.att[2]
 
         vel_twist = odom.twist.twist.linear
@@ -333,11 +328,7 @@ class Bebop_Model:
                              vel_twist.y * cos(hdg) + vel_twist.x * sin(hdg), 
                              vel_twist.z])
         
-
-
-        self.pose = odom.pose.pose
-        
-        
+        self.pose = odom.pose.pose            
 
 	    
     def update_att(self,commands):
@@ -345,7 +336,23 @@ class Bebop_Model:
         self.cmd_att[1] = -self.max_tilt*commands[1]
         self.cmd_att[2] = commands[2]
         self.cmd_att[3] = commands[3]
-        
+    
+    def update_pose(self,pose):
+        self.pos = np.array([pose.position.x, pose.position.y, pose.position.z])
+        # self.vel = 
+        # self.att = 
+
+    def get_drone_pose(self):
+        drone_pose = Drone_Pose()
+        drone_pose.pose = self.pose
+        drone_twist = Twist()
+        drone_twist.linear.x = self.vel[0]
+        drone_twist.linear.y = self.vel[1]
+        drone_twist.linear.z = self.vel[2]
+        drone_pose.vel = drone_twist
+
+        return drone_pose
+
 
 
 # PID control loop without smoothing
