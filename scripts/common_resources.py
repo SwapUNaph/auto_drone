@@ -10,7 +10,7 @@
 import math
 from tf import transformations as tfs
 from geometry_msgs.msg import Twist, Pose, Quaternion, Point
-from auto_drone.msg import WP_msg, Drone_Pose
+from auto_drone.msg import WP_Msg, Drone_Pose
 import numpy as np
 
 # Convert WP_Msg to array
@@ -183,8 +183,7 @@ def limit_value(value, limit):
 
 
 # Kalman Filter
-class KalmanFilter:
-  
+class KalmanFilter: 
   def __init__(self, A, B, C, Q, R, X0, dt=1):
     self.A = A
     self.B = B
@@ -201,15 +200,14 @@ class KalmanFilter:
     self.P = np.dot(F, np.dot(self.P, F.T)) + self.Q
     
   def update(self, Y):
-    V = Y - np.dot(self.C, self.X)
-    S = np.dot(self.C, np.dot(self.P, self.C.T)) + self.R
-    S = np.float32(S)
+    S = np.float32 (np.dot(self.C, np.dot(self.P, self.C.T)) + self.R)
+  
     if S.shape[0] > 1:
       self.K = np.dot(self.P, np.dot(self.C.T, np.linalg.inv(S)))
     else:
       self.K = np.dot(self.P, self.C.T / S)
       
-    self.X = self.X + np.dot(self.K, V)
+    self.X = self.X + np.dot(self.K, Y - np.dot(self.C, self.X))
     self.P =  np.dot(np.eye(self.P.shape[0]) - np.dot(self.K, self.C), self.P)
       
   def filter(self, U, Y):
@@ -244,20 +242,18 @@ class MVA:
 	def __init__(self, window = 5):
 		self.window = window
 		self.val_history = []
-		self.filtered = []
+		self.filtered = 0
 		
 	def update(self, val):
 		if len(self.val_history) < self.window:
 			self.val_history.append(val)
-			return np.zeros(val.shape)
+			return np.sum(np.array(self.val_history), axis=0)/len(self.val_history)
 		else:
-			if True : 	#np.linalg.norm(np.subtract(self.filtered, val)) < 10:  # Disturbance rejection (not yet implemented)
-				self.val_history.pop(0)
-				self.val_history.append(val)
-				self.filtered = np.sum(np.array(self.val_history), axis=0)/self.window
-				return self.filtered
-			else:
-				return self.filtered
+			self.val_history.pop(0)
+			self.val_history.append(val)
+			self.filtered = np.sum(np.array(self.val_history), axis=0)/self.window
+			return self.filtered
+
 	
 
 # waypoint class with position and hdg as well as a string function

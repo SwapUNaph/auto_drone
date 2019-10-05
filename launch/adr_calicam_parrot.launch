@@ -17,7 +17,7 @@
 
 
 	<!-- Launch RVIZ -->
-	<node type="rviz" name="rviz" pkg="rviz" args="-d $(find cvg_sim_gazebo)/rviz/zed_parrot.rviz" />
+	<node type="rviz" name="rviz" pkg="rviz" args="-d $(find auto_drone)/rviz/zed_parrot.rviz" />
 
 	<!-- Load simulation: false parameter -->
 	<rosparam command="load" file="$(find auto_drone)/params/zed_parrot.yaml" />

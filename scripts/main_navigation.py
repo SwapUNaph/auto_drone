@@ -892,7 +892,7 @@ if __name__ == '__main__':
     # Publishers
     publisher_state_auto = rospy.Publisher("/auto/state_auto",     Int32,                queue_size=1, latch=True)
     publisher_auto_drive = rospy.Publisher("/auto/auto_drive",     Twist,                queue_size=1, latch=True)
-    publisher_model = rospy.Publisher("/auto/pose",                Drone_Posee,          queue_size=1, latch=True)
+    publisher_model = rospy.Publisher("/auto/pose",                Drone_Pose,          queue_size=1, latch=True)
 
     publisher_wp_average = rospy.Publisher("/auto/wp_average",     WP_Msg,               queue_size=1, latch=True)
     publisher_wp_visual = rospy.Publisher("/auto/wp_visual",       WP_Msg,               queue_size=1, latch=True)

@@ -17,15 +17,13 @@ import math
 from std_msgs.msg import String
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist, Pose
-from auto_drone.msg import Drone_Pose, WP_Msg 
+from auto_drone.msg import Drone_Pose, WP_Msg, Detection_Active
 import numpy as np
 import cv2
 from common_resources import *
 from time import time
 from cv_bridge import CvBridge, CvBridgeError
 
-global bridge
-bridge = CvBridge()
 
 ######################  Detection Parameters  ##########################
 
@@ -36,19 +34,82 @@ GATE_SIZE = 1.15
 hsv_thresh_low = (0, 0, 230)
 hsv_thresh_high = (180, 150, 255)
 
-# MVA filters
-orientationFilter = MVA(10)
-translationFilter = MVA(10)
+DETECTION_ACTIVE = True
+GATE_TYPE_VERTICAL = None
+########################################################################
 
+########################### Global Variables  ##########################
 # Camera Capture
-global cap
 cap = cv2.VideoCapture(0)
 cap.set(3, 2560) # Width 2560x720
 cap.set(4, 720) # Height
 cap.set(5, 60) # FPS
-frame_width = cap.get(3)
+FRAME_WIDTH = cap.get(3)
+
+bridge = CvBridge()
+
+drone_position = np.zeros(3)
+drone_orientation = np.zeros(3)
+drone_linear_vel = np.zeros(3)
+drone_angular_vel = np.zeros(3)
+########################################################################
+
+##########################  Filters   ##################################
+# MVA filters
+orientationFilter = MVA(5)
+translationFilter = MVA(5)
+
+# Loop Frequency (important for kalman filtering)
+LOOP_FREQ = 60
+
+#Process Noise and Sensor noise
+PROCESS_NOISE = 0.01	# Variance of process noise
+SENSOR_NOISE = 0.01		# Variance of sensor noise
+
+def gatePoseDynamics(X,U,dt=1,noise=False):
+  v = U[:3].reshape(1,3)
+  w = U[3:].reshape(1,3)
+  x = X[:3].reshape(1,3)
+  theta = X[3:].reshape(1,3)
+  x = x + ( -v + np.cross(w,x) ) * dt
+  theta = theta - w * dt 
+  X = np.append(x,theta,axis=0).reshape(6,1) 
+  if noise:
+    X = X + np.random.randn(X.shape[0], 1)*0.1
+  return X
+
+def jacobianA(X,U):
+  return np.array([[0,-U[5],U[4],0,0,0],
+          [U[5],0,-U[3],0,0,0],
+          [-U[4],U[3],0,0,0,0],
+          [0,0,0,0,0,0],
+          [0,0,0,0,0,0],
+          [0,0,0,0,0,0]])
+
+def jacobianB(X,U):
+  return np.array([[-1,0,0,0,X[2],-X[1]],
+                    [0,-1,0,X[2],0,X[0]],
+                    [0,0,-1,X[1],-X[0],0],
+                    [0,0,0,-1,0,0],
+                    [0,0,0,0,-1,0],
+                    [0,0,0,0,0,-1]] )
+ 
+# C,Q,R
+C = np.eye(6, dtype='float')      
+Q = np.zeros((6, 6), float)
+np.fill_diagonal(Q, PROCESS_NOISE)
+
+R = np.zeros((C.shape[0], C.shape[0]), float)
+np.fill_diagonal(R, SENSOR_NOISE)
+
+# Initial Estimate
+X0 = np.zeros((6,1))
+
+# Instantiate EKF
+EKF = ExtendedKalmanFilter(gatePoseDynamics, jacobianA, jacobianB, C, Q, R, X0, dt=1.0/LOOP_FREQ)
 
 ########################################################################
+	
 def signal_handler(_, __):
     # enable Ctrl+C of the script
     sys.exit(0)
@@ -229,54 +290,75 @@ def getGatePose(contour, gate_side):
 
     return (euler, tvec)
 
-'
-
+def drone_odometry_callback(corrected_drone_pose):
+	global drone_position, drone_orientation, drone_linear_vel, drone_angular_vel
+	drone_position, drone_orientation  =  pose2array(corrected_drone_pose.pos)
+	drone_orientation = quat2euler(drone_orientation)
+	drone_linear_vel, drone_angular_vel = twist2array(corrected_drone_pose.vel)
 
 if __name__ == '__main__':
-    global cap, bridge, frame_width, GATE_SIZE
 
     signal.signal(signal.SIGINT, signal_handler)
 
     # Set simulation parameter to True. The system will start in simulation mode by default.
-    SIMULATION = rospy.get_param("/simulation")
+    #SIMULATION = rospy.get_param("/simulation")
             
     # Initialize node
     rospy.init_node('gate_detector', anonymous=False)
 
     # Subcribers
     # Detection state subscription
-    rospy.Subscriber('/state', Detection_Active, state_callback)
+    #rospy.Subscriber('/state', Detection_Active, state_callback)
+    
+    # Drone odometry subscription
+    rospy.Subscriber('/auto/pose', Drone_Pose, drone_odometry_callback)
 
 
     # Publishers
     # Image publication
-    gate_detection = rospy.Publisher('/gate_detection_image', Image, queue_size=2)
-
-    # Gate pose publisher
-    gate_pose_pub = rospy.Publisher('/gate_pose', WP_Msg, queue_size=5)
-    
-    # Filtered_gate_pose publication
-	filtered_gate_pose_pub = rospy.Publisher('/filtered_gate_pose', Pose, queue_size=1)
+    image_publisher = rospy.Publisher('/auto/gate_detection_image', Image, queue_size=2)
+    gate_pose_pub = rospy.Publisher('/auto/raw_gate_WP', WP_Msg, queue_size=5)
+    filtered_gate_pose_pub = rospy.Publisher('/auto/filtered_gate_WP', WP_Msg, queue_size=5)
     
 
     # Update rate for the control loop
-    rate = rospy.Rate(100) # 100 hz
+    rate = rospy.Rate(LOOP_FREQ) # LOOP_FREQ hz
 
     while not rospy.is_shutdown():
         ret, img = cap.read()
         if img is None:
             rospy.logerr("No Camera detected!!!")
         else:
-            img = img[:,:int(frame_width/2)]
+            img = img[:,:int(FRAME_WIDTH/2)]
+            
+            # Gate detection
             gate = detect_gate(img, hsv_thresh_low, hsv_thresh_high)
-            if gate is not None and np.array_equal(gate.shape, [4,2]): 
-                cv2.drawContours(img, [gate.reshape(4,2)], 0, (255, 0, 0), 2)	
-                annotateCorners(gate, img)
-                euler, tvec = getGatePose(gate, GATE_SIZE) # Gate size in meters
+            # If gate detected succesfully
+            if gate is not None and np.array_equal(gate.shape, [4,2]):
+                cv2.drawContours(img, [gate.reshape(4,2)], 0, (255, 0, 0), 2)
+                annotateCorners(gate, img)  
+                euler, tvec = getGatePose(gate, GATE_SIZE)
                 euler = orientationFilter.update(euler)
                 tvec = translationFilter.update(tvec)
                 gate_WP = array2WP(tvec, euler[2], "")
-                gate_pose_pub.publish(gate_WP)
+                EKF.C = np.eye(6) # Use measurements to fuse with predictions
+            else:
+				euler = np.zeros(3)
+				tvec = np.zeros(3)
+				gate_WP = WP_Msg()
+				EKF.C = np.zeros((6,6), float) # No measurements, rely only on prediction
+
                 
+			# Kalman Filtering
+            Y = np.append(tvec, euler).reshape((6,1))
+            U = np.append(drone_linear_vel, drone_angular_vel).reshape((6,1))
+            EKF.filter(U,Y)
+            X = EKF.X
+            filtered_gate_WP = array2WP(X[:3], X[5], "")
+
+            gate_pose_pub.publish(gate_WP)
+            filtered_gate_pose_pub.publish(filtered_gate_WP)    
             image_publisher.publish(bridge.cv2_to_imgmsg(img,"bgr8"))
+         
+        rate.sleep()
             
