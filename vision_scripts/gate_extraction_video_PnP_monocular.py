@@ -123,33 +123,32 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     img: CV2 RGB Image
     hsv_threshold_low: Low threshold for color detection in HSV format, numpy array of length 3
     hsv_threshold_high: High threshold for color detection in HSV format, numpy array of length 3
-    
+
     @return:
     contour: Numpy array of 4 coordinates of contour corners
     '''
     # Convert to HSV
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     #cv2.imshow('hsv', hsv)
-    
 
     # Mask
     mask = cv2.inRange(hsv, hsv_thresh_low, hsv_thresh_high)
     #print(mask)
     #cv2.imshow('mask', mask)
-    
+
     # Blur 
     blur = cv2.GaussianBlur(mask,(5,5), 3)
-    cv2.imshow('Blur', blur)
+    #cv2.imshow('Blur', blur)
 
     # Find contours
     contours, hierarchy = cv2.findContours(blur, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     #print("Contour_list: {}".format(contours))
-    
+
     # Print solidity
     #print("Contour solidities:")
     #for cnt in contours:
         #print(solidity(cnt))
-    
+
     # Draw all contours
     #contour_img = img.copy()
     #cv2.drawContours(contour_img, contours, -1, (0, 255, 0), 1)
@@ -164,66 +163,56 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
             
     #print("Contours before all filters: %d" % len(quadrl))
             
-    contour_before_mean = img.copy()
-    cv2.drawContours(contour_before_mean, quadrl, -1, (0, 255, 255), 1)
-    
     # Filter contour by area: area > 5 % of image area
     quadrlFiltered = list(filter(lambda x: (cv2.contourArea(x) > 500) , quadrl))
     #print("Contours after area filter: %d" % len(quadrlFiltered))
 
     # Filter for contour solidity > 0.9
-    quadrlFiltered = list(filter(lambda x: (solidity(x) > 0.75) , quadrlFiltered))
+    quadrlFiltered = list(filter(lambda x: (solidity(x) > 0.50) , quadrlFiltered))
     #print("Contours after solidity filter: %d" % len(quadrlFiltered))
-    
+
     # Filter by contour aspect ratio: 1.20 > AR > 0.8
     quadrlFiltered = list(filter(lambda x: (aspectRatio(x) > 0.5) & (aspectRatio(x) < 2.0) , quadrlFiltered))
     #print("Contours after aspect ratio filter: %d" % len(quadrlFiltered))
-    
-    # Filter by contour aspect ratio: 1.20 > AR > 0.8
-    quadrlFiltered = list(filter(lambda x: contourROIMean(x, blur) < 20 , quadrlFiltered))
+
+    # Filter by contour mean
+    quadrlFiltered = list(filter(lambda x: contourROIMean(x, blur) < 150 , quadrlFiltered))
     #print("Contours after aspect ratio filter: %d" % len(quadrlFiltered))
-    
-    cv2.drawContours(contour_before_mean, quadrlFiltered, -1, (0, 0, 255), 2)
-    cv2.imshow('contour_mean_img', contour_before_mean)
-    
-    #floodfill_img = mask.copy()
-    
-    
+
     #print("Square contour areas:")
     #for sq in quadrlFiltered:
         #print(cv2.contourArea(sq))
-    
+
     # Sort quadrilaterals by area
     quadrlFiltered = sorted(quadrlFiltered, key=lambda x: cv2.contourArea(x))
-    
-    
+
     if len(quadrlFiltered) > 0:
         gate_contour = quadrlFiltered[-1].reshape(4,2)
         
         # Sort the points starting with top left and going anti-clockwise
         center = gate_contour.mean(axis=0)
-        gate_cnt_sorted = [[0,0]]*4
+        gate_cnt_sorted = [None]*4
         for point in gate_contour:
             if point[0] < center[0] and point[1] < center[1]:
                     gate_cnt_sorted[0] = point
-            elif point[0] <= center[0] and point[1] >= center[1]:
+            elif point[0] < center[0] and point[1] >= center[1]:
                     gate_cnt_sorted[1] = point
-            elif point[0] > center[0] and point[1] < center[1]:
+            elif point[0] >= center[0] and point[1] < center[1]:
                 gate_cnt_sorted[3] = point
             else:
                 gate_cnt_sorted[2] = point
                 
-        gate_cnt_sorted = np.array(gate_cnt_sorted)
-        #print(gate_cnt_sorted)
-        if not np.isnan(gate_cnt_sorted).sum():
-            #print("gate contour: {}".format(gate_cnt_sorted))
-            return gate_cnt_sorted    # Return the largest square contour by area (returns coordinates of corners)
-        else:
-            print("No gate detected!")
-            return [np.nan]*4
+        gate_cnt_sorted_np = np.array(gate_cnt_sorted)
+        return gate_cnt_sorted_np
+        #if :
+            ##print("gate contour: {}".format(gate_cnt_sorted))
+            #return gate_cnt_sorted_np # Return the largest square contour by area (returns coordinates of corners)
+        #else:
+            #print("No gate detected!")
+            #return None
     else:
         print("No gate detected!")
-        return [np.nan]*4
+        return None
 
 
 def rectifyStereoImage(img):
@@ -267,13 +256,19 @@ def getGatePose(contour, objectPoints):
     #dQuatC = tfs.quaternion_from_matrix(dTc)
     #dQuatC = [ 0.5, -0.5, 0.5, -0.5 ]
     
-    # Camera Matrix
-    cameraMatrix = np.array( [[ 258.58131479,    0. ,         348.1852167 ],
-                              [   0. ,         257.25344992,  219.07752178],
-                              [   0. ,           0.,            1.        ]]  )
+    ## Camera Matrix
+    #cameraMatrix = np.array( [[ 258.58131479,    0. ,         348.1852167 ],
+                              #[   0. ,         257.25344992,  219.07752178],
+                              #[   0. ,           0.,            1.        ]]  )
     
-    # Distortion Coefficients
-    distCoeffs = np.array([[-0.36310169,  0.10981468,  0.0057042,  -0.001884,   -0.01328491]]  )
+    ## Distortion Coefficients
+    #distCoeffs = np.array([[-0.36310169,  0.10981468,  0.0057042,  -0.001884,   -0.01328491]]  )
+    
+    # Camera Matrix 720p 
+    cameraMatrix = np.array([[700, 0.0, 640], [0.0, 700, 360], [0.0, 0.0, 1.0]])
+
+    # Distortion Coefficients 720p
+    distCoeffs = np.array([-0.1740500032901764, 0.028304599225521088, 0.0, 0.0, 0.0])
     
     # Solve perspective 3 point algorithm
     (success, rvec, tvec) = cv2.solvePnP(objectPoints, contour.reshape(4,2).astype(float), cameraMatrix, distCoeffs)    
@@ -312,7 +307,7 @@ def main():
 
      #[[387 130]]]
 
-    gate_side = 1.15
+    gate_side = 1.4
     objectPoints = np.array([
             (-gate_side/2, -gate_side/2, 0.0),
             (-gate_side/2, gate_side/2, 0.0),
@@ -320,29 +315,29 @@ def main():
             (gate_side/2, -gate_side/2, 0.0)
         ])
     
-    cap = cv2.VideoCapture("videos/dual_image_video_green.mp4")
+    cap = cv2.VideoCapture("videos/avi_fast/red_moving_fast.avi")
     #cap = cv2.VideoCapture(0)
     
     # 2.2K : 4416x1242 : 15 FPS
     # 1080p : 3840x1080 : 30 FPS
     # 720p : 2560x720 : 60 FPS
     # WVGA : 1344x376 : 100 FPS
-    cap.set(5, 30)    # FPS
-    cap.set(3, 640)# Image Width
-    cap.set(4, 480)    # Image Height
-    cap.set(12, 0.5) # Saturation
-    cap.set(10, 0.5) # Brightness
+    #cap.set(5, 30)    # FPS
+    #cap.set(3, 640)# Image Width
+    #cap.set(4, 480)    # Image Height
+    #cap.set(12, 0.5) # Saturation
+    #cap.set(10, 0.5) # Brightness
     
     frame_width = int(cap.get(3))
     frame_height = int(cap.get(4))
     print(frame_width, frame_height)
     
-    VIDEO_RECORDING = False
+    VIDEO_RECORDING = True
          
     if VIDEO_RECORDING:
         # Define the codec and create VideoWriter object.The output is stored in 'outpy.avi' file.
         filename = 'videos/gate_detection_'+ strftime("%d-%b-%Y_%H-%M-%S", localtime()) + '.avi'
-        out = cv2.VideoWriter(filename,cv2.VideoWriter_fourcc('M','J','P','G'), 40, (frame_width,frame_height))
+        out = cv2.VideoWriter(filename,cv2.VideoWriter_fourcc('M','J','P','G'), cap.get(5), (frame_width,frame_height))
     
     # Blue gate    
     #hsv_thresh_low = (110, 5, 100)
@@ -368,9 +363,9 @@ def main():
     #hsv_thresh_low = (92, 92, 157)
     #hsv_thresh_high = (196, 202, 206)
     
-    #All color LEDs : 0 0 233 180 121 247
-    hsv_thresh_low = (0, 0, 230)
-    hsv_thresh_high = (180, 100, 255)
+    #All color LEDs : 0 0 191 180 255 255
+    hsv_thresh_low = (0, 0, 200)
+    hsv_thresh_high = (180, 255, 255)
     
     # MVA filters
     orntFilter = MVA(15)
@@ -408,7 +403,7 @@ def main():
             #right_cnt = detect_gate(right_img, hsv_thresh_low, hsv_thresh_high)
             
             
-            if not np.isnan(left_cnt).sum(): #or np.isnan(right_cnt).sum()):    
+            if left_cnt is not None and np.array_equal(left_cnt.shape, [4,2]):    
                 
                 euler, tvec = getGatePose(left_cnt, objectPoints)
                 
@@ -420,11 +415,11 @@ def main():
                 
                 cv2.drawContours(img, [left_cnt.reshape(4,2)], 0, (0,0,255), 1)
                 #cv2.circle(img, (left_center[0], left_center[1]), 10, (255,255,0), 0)
-                cv2.putText(img, "X: {0:.2f}, Y: {1:.2f}, Z: {2:.2f} (m)".format(tvec[0], tvec[1], tvec[2]), (10, frame_height - 70), cv2.FONT_HERSHEY_SIMPLEX, 2, (0,0,0), 4, cv2.LINE_AA)
-                cv2.putText(img, "Roll: {0:.2f}, Pitch: {1:.2f}, Yaw: {2:.2f} (deg)".format(euler[0], euler[1], euler[2]), (10, frame_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 2, (0,0,0), 4, cv2.LINE_AA)
-                
-                cv2.putText(img, "X: {0:.2f}, Y: {1:.2f}, Z: {2:.2f} (m)".format(tvec[0], tvec[1], tvec[2]), (10, frame_height - 70), cv2.FONT_HERSHEY_SIMPLEX, 2, (255,255,255), 2, cv2.LINE_AA)
-                cv2.putText(img, "Roll: {0:.2f}, Pitch: {1:.2f}, Yaw: {2:.2f} (deg)".format(euler[0], euler[1], euler[2]), (10, frame_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 2, (255,255,255), 2, cv2.LINE_AA)
+                cv2.putText(img, "X: {0:.2f}, Y: {1:.2f}, Z: {2:.2f} (m)".format(tvec[0], tvec[1], tvec[2]), (10, frame_height - 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,0), 2, cv2.LINE_AA)
+                cv2.putText(img, "Roll: {0:.2f}, Pitch: {1:.2f}, Yaw: {2:.2f} (deg)".format(euler[0], euler[1], euler[2]), (10, frame_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,0), 2, cv2.LINE_AA)
+            
+                cv2.putText(img, "X: {0:.2f}, Y: {1:.2f}, Z: {2:.2f} (m)".format(tvec[0], tvec[1], tvec[2]), (10, frame_height - 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 1, cv2.LINE_AA)
+                cv2.putText(img, "Roll: {0:.2f}, Pitch: {1:.2f}, Yaw: {2:.2f} (deg)".format(euler[0], euler[1], euler[2]), (10, frame_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 1, cv2.LINE_AA)
 
                 annotateCorners(left_cnt, img)  
                 
@@ -448,7 +443,7 @@ def main():
             if VIDEO_RECORDING:
                 out.write(img)  
             print("FPS: {} Hz".format(cap.get(5)))
-            #cv2.imshow('Gate detection image',img)
+            cv2.imshow('Gate detection image',img)
             #cv2.imshow('right image',right_img)q
 
         else:

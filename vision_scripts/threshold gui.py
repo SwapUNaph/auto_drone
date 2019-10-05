@@ -3,7 +3,7 @@ import cv2
 
 folder_name = "videos/"
 filename = "threshold.txt"
-LIVE = False
+LIVE = True
 
 max_value = 255
 max_value_H = 180
@@ -91,12 +91,12 @@ def on_save(val):
 
 
 
-video_file = "dual_image_video_green.mp4"
+video_file = "avi_staying/blue_5m.avi"
 image_file = "vlcsnap-2019-09-12-17h25m19s944.png"
 
 if LIVE:
-	#cap = cv2.VideoCapture(folder_name + video_file)
-	cap = cv2.VideoCapture(0)
+	cap = cv2.VideoCapture(folder_name + video_file)
+	#cap = cv2.VideoCapture(0)
 else:
 	frame = cv2.imread("vlcsnap-2019-09-12-17h25m19s944.png")
 
