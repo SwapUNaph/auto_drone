@@ -320,8 +320,8 @@ def main():
             (gate_side/2, -gate_side/2, 0.0)
         ])
     
-    #cap = cv2.VideoCapture("videos/dual_image_video_green.mp4")
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture("videos/dual_image_video_green.mp4")
+    #cap = cv2.VideoCapture(0)
     
     # 2.2K : 4416x1242 : 15 FPS
     # 1080p : 3840x1080 : 30 FPS
