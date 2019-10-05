@@ -1,0 +1,2 @@
+Bool active
+Bool vertical

@@ -57,6 +57,7 @@ add_message_files(
    Traj_error.msg
    Drone_Pose.msg
    WP_Msg.msg
+   Detection_Active.msg
  )
 
 ## Generate services in the 'srv' folder

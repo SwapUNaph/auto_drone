@@ -51,19 +51,14 @@ def callback_visual_gate_detection_changed(data):
     # detection must be active
     if not detection_active:
         rospy.loginfo("detection not active")
-        log_string = "0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0"
-        publisher_visual_log.publish(log_string)
         return
 
     # content must not be empty
     if data.tvec == ():
         rospy.loginfo("empty visual input")
-        log_string = "0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0"
-        publisher_visual_log.publish(log_string)
         return
     
-    rospy.loginfo("visual gate detected")
-
+    '''
     # read data
     bebop_position = data.bebop_pose.position
     bebop_orientation = data.bebop_pose.orientation
@@ -219,8 +214,7 @@ def callback_visual_gate_detection_changed(data):
 
     rospy.loginfo("visual gate done")
 
-    return
-
+    '''
 
 
 # needs work
@@ -237,7 +231,7 @@ def navigate_through():
     rospy.loginfo("fly from")
     rospy.loginfo([bebop_p[0], bebop_p[1], bebop_p[2], hdg])
     rospy.loginfo("fly to")
-    rospy.loginfo(wp_select)
+    rospy.loginfo(current_state.fly.pos)
 
     # heading angle
     angle = tfs.euler_from_quaternion(bebop_q)[2]
@@ -246,12 +240,12 @@ def navigate_through():
     velocity = bebop_odometry.twist.twist.linear
 
     # global difference between WP ad position
-    diff_global = wp_select.pos - bebop_p
+    diff_global = current_state.fly.pos - bebop_p
     # X and Y components hypothenuse
     dist = math.hypot(diff_global[0], diff_global[1])
 
     # heading of the gate itself
-    gate_theta = wp_select.hdg
+    gate_theta = current_state.fly.hdg
     # heading from drone to gate position
     pos_theta = math.atan2(diff_global[1], diff_global[0])
 
@@ -369,22 +363,22 @@ def navigate_point():
     # navigation algorithm to fly us to WPs    
     bebop_p = bebop_model.pos
 
-    angle = bebop_model.att[2]
+    hdg = bebop_model.att[2]
     
 
+    target = current_state.fly.pos
+    target_look = current_state.look.pos
     # transform velocities into global frame
     global_vel = bebop_model.vel
+
     
-    diff_global = current_state.look - bebop_p
+    diff_global = current_state.fly.pos - bebop_p
     
 
     rospy.loginfo("fly from")
-    rospy.loginfo([bebop_p[0], bebop_p[1], bebop_p[2], angle])
+    rospy.loginfo([bebop_p[0], bebop_p[1], bebop_p[2], hdg])
     rospy.loginfo("fly to")
-    rospy.loginfo(target)
-
-    
-
+    rospy.loginfo(current_state.fly.pos)
     
     
     # LATERAL CONTROLLER
@@ -431,10 +425,8 @@ def navigate_point():
 
     
     # return navigation commands back into vehicle frame
-    #nav_cmd_x_veh = sum(nav_cmd_x_lim) * np.cos(-angle) - sum(nav_cmd_y_lim) * np.sin(-angle)
-    #nav_cmd_y_veh = sum(nav_cmd_y_lim) * np.cos(-angle) + sum(nav_cmd_x_lim) * np.sin(-angle)
-    nav_cmd_x_veh = nav_cmd_x_lim * np.cos(-angle) - nav_cmd_y_lim * np.sin(-angle)
-    nav_cmd_y_veh = nav_cmd_y_lim * np.cos(-angle) + nav_cmd_x_lim * np.sin(-angle)
+    nav_cmd_x_veh = nav_cmd_x_lim * np.cos(-hdg) - nav_cmd_y_lim * np.sin(-hdg)
+    nav_cmd_y_veh = nav_cmd_y_lim * np.cos(-hdg) + nav_cmd_x_lim * np.sin(-hdg)
     
 
 
@@ -447,11 +439,10 @@ def navigate_point():
 
     # R CONTROLLER
     
-    diff_global_look = current_state.look - bebop_p
+    diff_global_look = target_look - bebop_p
     pos_theta = np.arctan2(diff_global_look[1], diff_global_look[0])
 
-
-    r_error = -(angle - pos_theta)
+    r_error = -(hdg - pos_theta)
     if r_error > np.pi:
         r_error = -2 * np.pi + r_error
     elif r_error < -np.pi:
@@ -464,8 +455,8 @@ def navigate_point():
     
     # Create twist msg
     msg = Twist()
-    msg.linear.x = point_lateral_gain*cr.limit_value(nav_cmd_x, nav_limit_x_thr)
-    msg.linear.y = point_lateral_gain*cr.limit_value(nav_cmd_y, nav_limit_y_thr)
+    msg.linear.x = point_lateral_gain*nav_cmd_x_veh
+    msg.linear.y = point_lateral_gain*nav_cmd_y_veh
     msg.linear.z = cr.limit_value(sum(nav_cmd_z), nav_limit_z)
     msg.angular.z = cr.limit_value(sum(nav_cmd_r), nav_limit_r)
 
@@ -533,28 +524,21 @@ def calculate_distance():
     if current_state.fly is None or bebop_model.pos is None:
         return 999
 
-    diff_global = wp_select.pos - bebop_model.pos
+    diff_global = current_state.fly.pos - bebop_model.pos
 
     if nav_active == "point":
         # use linear 3D distance between two points. Add penalty for angular offset
         linear_distance = np.linalg.norm(diff_global)
 
-        # bebop_orientation = bebop_odometry.pose.pose.orientation
-        # bebop_q = np.array([bebop_orientation.x, bebop_orientation.y, bebop_orientation.z, bebop_orientation.w])
-        # own_heading = tfs.euler_from_quaternion(bebop_q)[2]
-        # diff_global_look = wp_look.pos - bebop_p
-        # pos_theta = math.atan2(diff_global_look[1], diff_global_look[0])
-        # angular_diff = abs(own_heading - pos_theta)
-        # angular_diff = min(angular_diff, 2*math.pi-angular_diff)
-        return linear_distance #+ angular_diff * (180.0 / 15 * 0.3) / math.pi  # 15deg offset equal 30cm
+        return linear_distance 
 
 
     elif nav_active == "through":
         # in any through navigation, use a plane instead that is parallel to gate itself. Eventually it doesn't matter
         # how far we are from the gate in 3D but how far we are from the plane of the gate
         flat_distance = np.linalg.norm([diff_global[0], diff_global[1], 0])
-        heading_to_gate = math.atan2(wp_select.pos[1] - bebop_position.y, wp_select.pos[0] - bebop_position.x)
-        heading_of_gate = wp_select.hdg
+        heading_to_gate = math.atan2(current_state.fly.pos[1] - bebop_position.y, current_state.fly.pos[0] - bebop_position.x)
+        heading_of_gate = current_state.fly.hdg
         heading_difference = heading_to_gate - heading_of_gate
         return flat_distance * math.cos(heading_difference)
 
@@ -591,7 +575,7 @@ class State:
         nav_PID_z.reset()
         nav_PID_r.reset()
         # na
-    v_through_PID_y_pos.reset()
+        # nav_through_PID_y_pos.reset()
         # nav_through_PID_x_vel.reset()
         # nav_through_PID_y_vel.reset()
         # nav_through_PID_z_vel.reset()
@@ -645,17 +629,12 @@ class State:
             msg = WP_Msg()
             
             if self.nav_active == 'through':
-                msg.pos.x = self.fly[0]
-                msg.pos.y = self.fly[1]
-                msg.pos.z = self.fly[2]
+                msg.pos.x = self.fly.pos[0]
+                msg.pos.y = self.fly.pos[1]
+                msg.pos.z = self.fly.pos[2]
+                if self.fly.hdg is not None:
+                    msg.hdg = self.fly.hdg
                 publisher_wp_blind.publish(msg)
-
-
-        # select visual if it is available, otherwise select blind
-        global wp_select
-        global wp_look
-        wp_select = cr.WP(self.fly,None)
-        wp_look = cr.WP(self.look,None)
 
 
 
@@ -753,8 +732,6 @@ def callback_bebop_odometry_changed(data):
     publisher_pose.publish(bebop_model.pose)
     
 
-
-
 def update_last_known_bebop(odom):
 
     pos = odom.pose.pose.position
@@ -819,21 +796,7 @@ def update_pose_estimate():
 
 
 def update_controller():
-
-    #global nav_active
-    #global bebop_model
-	
-	#global auto_driving_msg
-    #global wp_select
-    #global wp_visual
-    #global wp_visual_old
-    #global wp_input_history
-    #global wp_blind
-    #global wp_blind_old
-    #global wp_look
-    #global wp_takeoff
     
-    # navigate to wp_select
     if nav_active == "off":
         # navigation off, send empty message and return
         rospy.loginfo("Navigation turned off")
@@ -883,26 +846,27 @@ if __name__ == '__main__':
     
 
     gate_filtered = None                                        # Filtered gate input from gate detection
-    
+   
+
+
     wp_visual = None                                            # almost same as above (see calculate_visual_wp)
     wp_visual_old = None                                        # backup of last visual wp
     wp_input_history = []                                       # history of gate measurements
     wp_blind = None                                             # wp calculated from map layout
     wp_blind_old = None                                         # backup of last blind wp
-    wp_look = None                                              # where we are looking while flying to blind wp
-    wp_select = None                                            # which one (blind or visual) are we flying to
-    wp_takeoff = None                                           # remembers where takeoff occurred
+    
     
     
     detection_active = False                                    # gate detection active boolean
     nav_active = "off"                                          # activated navigation algorithm
     
     
+    # Controller Classes
     nav_PID_z = cr.PID(1.0, 0, 0.0)
     nav_PID_r = cr.PID(0.5, 0, 1.0)
     
 
-    
+    # Controller Params
     nav_limit_x_thr = .1  # .25                                 # absolute limit to all cmd before being sent, thr_nav
     nav_limit_y_thr = .2  # .4
     nav_limit_z = .5  # .75
@@ -918,12 +882,11 @@ if __name__ == '__main__':
     
     nav_drag = 0.0
 
+
     dist_gate_blind = 1.0                                       # how exact go to blind wp before advancing state
     dist_gate_close = 0.5                                       # how close to gate before advancing state (approach)
-    dist_exit_gate_wp = 15.0                                    # how far away is the exit waypoint
-    dist_egw = dist_exit_gate_wp                                # abbreviation for above
-    dist_exit_gate_min = 0.3                                    # how far behind the gate is it considered passed
-    dist_exit_gate = dist_exit_gate_wp - dist_exit_gate_min     # calculated distance to exit waypoint for normal gate
+    dist_exit_gate_wp = 20.0                                    # how far away is the exit waypoint
+    exit_thrs = dist_exit_gate_wp - .75                         # how far behind the gate is it considered passed
     
 
     # Publishers
@@ -939,7 +902,7 @@ if __name__ == '__main__':
 
     publisher_wp_current = rospy.Publisher("/auto/wp_current",     WP_Msg,               queue_size=1, latch=True)
     publisher_nav_log = rospy.Publisher("/auto/navigation_logger", Float32MultiArray,    queue_size=1, latch=True)
-    publisher_visual_log = rospy.Publisher("/auto/visual_logger",  String,               queue_size=1, latch=True)
+    publisher_visual_log = rospy.Publisher("/auto/visual_logger",  Float32MultiArray,    queue_size=1, latch=True)
     publisher_dev_log = rospy.Publisher("/auto/dev_logger",        String,               queue_size=1, latch=True)
 
     publisher_gate_size = rospy.Publisher("/auto/gate_size",       Float32,              queue_size=1, latch=True)
@@ -954,27 +917,26 @@ if __name__ == '__main__':
 
     # Params if needs to guess gate
     # 0 No gate detection
-    v = 1 # Gate detection vertical
-    h = 2 # Gate detection vertical
+    v = 'vertical' # Gate detection vertical
+    h = 'horizontal' # Gate detection vertical
 
     # Madrid color values for gates
     gate_params1 = np.array([100, 140, 50, 140, 255, 255])
 
     
-    start_pos = np.array([0.7, 5, 0])
+    start_pos = cr.WP(np.array([0.7, 5, 0]),None)
 
-    gate_pos_1 = np.array([-0.7, 0.0, 1.7])
-    gate_pos_2 = np.array([1.4, 13, 1.7])
+    gate_wp_1 = cr.WP(np.array([-0.7, 0.0, 1.7]),-np.pi/2)
+    gate_wp_2 = cr.WP(np.array([1.4, 13, 1.7]),np.pi/2)
     
+    look_pos_1 = cr.WP(np.array([-0.7, 7, 1.7]),None)
+    look_pos_2 = cr.WP(np.array([1.4, 6, 1.7]),None)
 
-    look_pos_1 = np.array([-0.7, 7, 1.7])
-    look_pos_2 = np.array([1.4, 6, 1.7])
+    far_pos_1 = cr.WP(np.array([-0.7, -dist_exit_gate_wp, 1.7]),None)
+    far_pos_2 = cr.WP(np.array([0.7, 13+dist_exit_gate_wp, 1.7]),None)
 
-    far_pos_1 = np.array([-0.7, -20, 1.7])
-    far_pos_2 = np.array([0.7, 33, 1.7])
-
-    turn_pos_1 = np.array([2.0, -1.25, 1.7])
-    turn_pos_2 = np.array([-1.5, 14.25, 1.7])
+    turn_pos_1 = cr.WP(np.array([2.0, -1.25, 1.7]),None)
+    turn_pos_2 = cr.WP(np.array([-1.5, 14.25, 1.7]),None)
 
     # own_state, next_state, condition_type, condition_thres, exit_clear_visual, detection_active_type, nav_active_str, gate_color, fly, look 
     
@@ -983,24 +945,24 @@ if __name__ == '__main__':
     # states[03] = State(03, 04, "bebop", cr.Bebop.HOVERING, 0, 0, o, None, None, None)                                  # Taking off
     # states[04] = State(04, 10, "time",  1.0,               0, 0, o, None, None, None)                                  # Hovering
 
-    states[10] = State(10, 90, "dist",  0.4,               0, 0, p, None, look_pos_1, gate_pos_1)				         # testing 
+    states[10] = State(10, 90, "dist",  0.4,               0, 0, p, None, look_pos_1, gate_wp_1)				         # testing 
 
 
-    states[11] = State(11, 12, "wp",    None,              0, v, p, gate_params1, look_pos_1, gate_pos_1)                # Move and Look for gate
+    states[11] = State(11, 12, "wp",    None,              0, v, p, gate_params1, look_pos_1, gate_wp_1)                 # Move and Look for gate
     states[12] = State(12, 13, "dist",  dist_gate_close,   1, v, t, gate_params1, None, None)                            # move through gate until cant see it
-    # need to fix positions here
-    states[13] = State(13, 21, "dist",  dist_exit_gate,    0, 0, p, gate_params1, [dist_egw, 0, 0], [dist_egw, 0, 0])    # Move through gate
+    states[13] = State(13, 14, "dist",  exit_thrs,         0, 0, p, None, far_pos_1, turn_pos_1)                         # Move through gate
+    states[14] = State(14, 21, "dist",  dist_gate_blind,   0, 0, p, None, turn_pos_1, gate_wp_2)                         # Turn around manuever
 
     '''
     states[20] = State(20, 21, "dist",  dist_gate_blind,   0, 0, p, None, [1.7, 0, 0], [5.0, 0, 0])               
     states[21] = State(21, 22, "wp",    None,              0, 1, p, gate_params1, [3.25, 0, 0], [5.0, 0, 0])
     states[22] = State(22, 23, "dist",  dist_gate_close,   1, 1, t, gate_params1, None, None)
-    states[23] = State(23, 31, "dist",  dist_exit_gate,    0, 0, p, None, [dist_egw, 0, 0], [dist_egw, 0, 0])
+    states[23] = State(23, 31, "dist",  exit_thrs,    0, 0, p, None, [dist_egw, 0, 0], [dist_egw, 0, 0])
 
     states[30] = State(30, 31, "dist",  dist_gate_blind,   0, 0, p, None, [1.5, -0.25, 0], [0.7, -2.75, 0])
     states[31] = State(31, 32, "wp",    None,              0, 1, p, gate_params1, [0.9, -0.5, -0.3], [0.7, -2.75, 0])
     states[32] = State(32, 33, "dist",  dist_gate_close,   1, 1, t, gate_params1, None, None)
-    states[33] = State(33, 10, "dist",  dist_exit_gate,    0, 0, p, None, [dist_egw, 0, 0], [dist_egw, 0, 0])
+    states[33] = State(33, 10, "dist",  exit_thrs,    0, 0, p, None, [dist_egw, 0, 0], [dist_egw, 0, 0])
     '''
 
     states[90] = State(90, 91, "bebop", cr.Bebop.LANDING,  0, 0, o, None, None, None)									# land
