@@ -18,6 +18,7 @@ from std_msgs.msg import String
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist, Pose
 from auto_drone.msg import Drone_Pose, WP_Msg, Detection_Active
+from nav_msgs.msg import Odometry
 import numpy as np
 import cv2
 from common_resources import *
@@ -131,8 +132,8 @@ def signal_handler(_, __):
     sys.exit(0)
     
 def logMeasuredGatePose(X):
-    X[3:] = X[3:] * 180.0 / 3.141
-    rospy.loginfo("\nPosition: {} (m) \nOrientation: (deg)\n".format(X[:3],X[3:]))
+    euler = X[3:] * 180.0 / math.pi
+    rospy.loginfo("\nPosition: {} (m) \nOrientation: {}(deg)\n".format(X[:3],euler))
     
     
 def aspectRatio(contour):
@@ -187,11 +188,6 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     im2, contours, hierarchy = cv2.findContours(blur, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     #print("Contour_list: {}".format(contours))
 
-    # Print solidity
-    #print("Contour solidities:")
-    #for cnt in contours:
-        #print(solidity(cnt))
-
     # Draw all contours
     #contour_img = img.copy()
     #cv2.drawContours(contour_img, contours, -1, (0, 255, 0), 1)
@@ -210,15 +206,15 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     quadrlFiltered = list(filter(lambda x: (cv2.contourArea(x) > AREA_THRESH) , quadrl))
     #print("Contours after area filter: %d" % len(quadrlFiltered))
 
-    # Filter for contour solidity > 0.9
+    # Filter contour by solidity > 0.9
     quadrlFiltered = list(filter(lambda x: (solidity(x) > SOLIDITY_THRESH) , quadrlFiltered))
     #print("Contours after solidity filter: %d" % len(quadrlFiltered))
 
-    # Filter by contour aspect ratio: 1.20 > AR > 0.8
+    # Filter contour by aspect ratio: 1.20 > AR > 0.8
     quadrlFiltered = list(filter(lambda x: (aspectRatio(x) > ASPECT_RATIO_THRESH_LOW) & (aspectRatio(x) < ASPECT_RATIO_THRESH_HIGH) , quadrlFiltered))
     #print("Contours after aspect ratio filter: %d" % len(quadrlFiltered))
 
-    # Filter by contour mean
+    # Filter contour by ROI mean
     quadrlFiltered = list(filter(lambda x: contourROIMean(x, blur) < ROI_MEAN_THRESH , quadrlFiltered))
     #print("Contours after aspect ratio filter: %d" % len(quadrlFiltered))
 
@@ -229,10 +225,12 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     # Sort quadrilaterals by area
     quadrlFiltered = sorted(quadrlFiltered, key=lambda x: cv2.contourArea(x))
 
+    
     if len(quadrlFiltered) > 0:
+        # Get the largest contour
         gate_contour = quadrlFiltered[-1].reshape(4,2)
         
-        # Sort the points starting with top left and going anti-clockwise
+        # Sort the points starting with top left and going counter-clockwise
         center = gate_contour.mean(axis=0)
         gate_cnt_sorted = [None]*4
         for point in gate_contour:
@@ -247,18 +245,12 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
                 
         gate_cnt_sorted_np = np.array(gate_cnt_sorted)
         return gate_cnt_sorted_np
-        #if :
-            ##print("gate contour: {}".format(gate_cnt_sorted))
-            #return gate_cnt_sorted_np # Return the largest square contour by area (returns coordinates of corners)
-        #else:
-            #print("No gate detected!")
-            #return None
     else:
         print("No gate detected!")
         return None
 
 def getGatePose(contour, gate_side):
-     '''
+    '''
     Description: The function takes in gate contour points in counter clockwise direction starting from
                 top left corner and dimensions of gate side and outputs the relative positin of the gate    
                 wrt drone.
@@ -272,22 +264,22 @@ def getGatePose(contour, gate_side):
     '''
 
     objectPoints = np.array([
-            (-gate_side/2, -gate_side/2, 0.0),
-            (-gate_side/2, gate_side/2, 0.0),
-            (gate_side/2, gate_side/2, 0.0),
-            (gate_side/2, -gate_side/2, 0.0)
-        ])
+        (-gate_side/2, -gate_side/2, 0.0),
+        (-gate_side/2, gate_side/2, 0.0),
+        (gate_side/2, gate_side/2, 0.0),
+        (gate_side/2, -gate_side/2, 0.0)
+    ])
 
     #Camera Transformation wrt drone
     dRc = np.array([[0,0,1],[-1,0,0],[0,-1,0]])
 
-    ##########################  Camera matrix and distortion coefficients for CaliCam    ##################################
+    ############################  For CaliCam    ##################################
     # cameraMatrix = np.array([[ 258.58131479, 0.0 , 348.1852167 ], [0.0 , 257.25344992, 219.07752178], [0.0 , 0.0, 1.0]])
     # distCoeffs = np.array([[-0.36310169,  0.10981468,  0.0057042,  -0.001884,   -0.01328491]])
 
-    #######################################################################################################################
+    ###############################################################################
 
-    ####################################   For ZED stereo   #########################################################
+    ####################################   For ZED stereo   #############################
     ## Camera Matrix 720p 
     cameraMatrix = np.array([[700, 0.0, 640], [0.0, 700, 360], [0.0, 0.0, 1.0]])
 
@@ -300,24 +292,29 @@ def getGatePose(contour, gate_side):
     # Distortion Coefficients VGA
     #distCoeffs = np.array([-0.17447000741958618, 0.027922799810767174, 0.0, 0.0, 0.0])
 
-    #################################################################################################################
+    #####################################################################################
 
-    # Solve perspective 3 point algorithm
+    # Solve perspective 3 point problem
     (success, rvec, tvec) = cv2.solvePnP(objectPoints, contour.reshape(4,2).astype(float), cameraMatrix, distCoeffs, cv2.SOLVEPNP_P3P)
     rvec = np.squeeze(rvec)
-    tvec = np.squeeze(tvec)	
+    tvec = np.squeeze(tvec)
 
     # Transform tvec and euler angles to drone coordinates
-    tvec = np.matmul(dRc, tvec)	
+    tvec = np.matmul(dRc, tvec)
     euler = np.matmul(dRc, rvec.T)
 
     return (euler, tvec) # euler angles in radians
 
-def drone_odometry_callback(corrected_drone_pose):
-	global drone_position, drone_orientation, drone_linear_vel, drone_angular_vel
-	drone_position, drone_orientation  =  pose2array(corrected_drone_pose.pos)
-	drone_orientation = quat2euler(drone_orientation)
-	drone_linear_vel, drone_angular_vel = twist2array(corrected_drone_pose.vel)
+def drone_odometry_callback(corrected_drone_odom):
+    global drone_position, drone_orientation, drone_linear_vel, drone_angular_vel
+    
+    #drone_position, drone_orientation  =  pose2array(corrected_drone_odom.pos)
+    #drone_orientation = quat2euler(drone_orientation)
+    #drone_linear_vel, drone_angular_vel = twist2array(corrected_drone_odom.vel)
+    
+    drone_position, drone_orientation  =  pose2array(corrected_drone_odom.pose.pose)
+    drone_orientation = quat2euler(drone_orientation)
+    drone_linear_vel, drone_angular_vel = twist2array(corrected_drone_odom.twist.twist)
 
 
 
@@ -337,11 +334,11 @@ if __name__ == '__main__':
     #rospy.Subscriber('/state', Detection_Active, state_callback)
     
     # Drone odometry subscription
-    rospy.Subscriber('/auto/pose', Drone_Pose, drone_odometry_callback)
+    #rospy.Subscriber('/auto/pose', Drone_Pose, drone_odometry_callback)
+    rospy.Subscriber('/bebop/odom', Odometry, drone_odometry_callback)
 
 
     # Publishers
-    # Image publication
     image_publisher = rospy.Publisher('/auto/gate_detection_image', Image, queue_size=2)
     gate_pose_pub = rospy.Publisher('/auto/raw_gate_WP', WP_Msg, queue_size=5)
     filtered_gate_pose_pub = rospy.Publisher('/auto/filtered_gate_WP', WP_Msg, queue_size=5)
