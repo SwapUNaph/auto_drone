@@ -32,7 +32,7 @@ GATE_SIZE = 1.15
 
 # HSV thresholds for gate
 hsv_thresh_low = (0, 0, 230)
-hsv_thresh_high = (180, 150, 255)
+hsv_thresh_high = (180, 255, 255)
 
 DETECTION_ACTIVE = True
 GATE_TYPE_VERTICAL = None
@@ -66,6 +66,10 @@ LOOP_FREQ = 60
 PROCESS_NOISE = 0.01	# Variance of process noise
 SENSOR_NOISE = 0.01		# Variance of sensor noise
 
+def logMeasuredGatePose(X):
+    X[3:] = X[3:] * 180.0 / 3.141
+    rospy.loginfo("\nx: {}, y: {}, z: {} (m) \nroll: {}, pitch: {}, yaw: {} (deg)\n".format(X[0],X[1],X[2],X[3],X[4],X[5]))
+    
 def gatePoseDynamics(X,U,dt=1,noise=False):
   v = U[:3].reshape(1,3)
   w = U[3:].reshape(1,3)
@@ -186,7 +190,7 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     #print("Contours before all filters: %d" % len(quadrl))
             
     # Filter contour by area: area > 5 % of image area
-    quadrlFiltered = list(filter(lambda x: (cv2.contourArea(x) > 500) , quadrl))
+    quadrlFiltered = list(filter(lambda x: (cv2.contourArea(x) > 1000) , quadrl))
     #print("Contours after area filter: %d" % len(quadrlFiltered))
 
     # Filter for contour solidity > 0.9
@@ -194,11 +198,11 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     #print("Contours after solidity filter: %d" % len(quadrlFiltered))
 
     # Filter by contour aspect ratio: 1.20 > AR > 0.8
-    quadrlFiltered = list(filter(lambda x: (aspectRatio(x) > 0.5) & (aspectRatio(x) < 2.0) , quadrlFiltered))
+    quadrlFiltered = list(filter(lambda x: (aspectRatio(x) > 0.8) & (aspectRatio(x) < 1.25) , quadrlFiltered))
     #print("Contours after aspect ratio filter: %d" % len(quadrlFiltered))
 
     # Filter by contour mean
-    quadrlFiltered = list(filter(lambda x: contourROIMean(x, blur) < 150 , quadrlFiltered))
+    quadrlFiltered = list(filter(lambda x: contourROIMean(x, blur) < 100 , quadrlFiltered))
     #print("Contours after aspect ratio filter: %d" % len(quadrlFiltered))
 
     #print("Square contour areas:")
@@ -277,11 +281,10 @@ def getGatePose(contour, gate_side):
     (success, rvec, tvec) = cv2.solvePnP(objectPoints, contour.reshape(4,2).astype(float), cameraMatrix, distCoeffs, cv2.SOLVEPNP_P3P)
     rvec = np.squeeze(rvec)
     tvec = np.squeeze(tvec)	
-    quat = rvec2quat(rvec)
 
     # Transform tvec and euler angles to drone coordinates
     tvec = np.matmul(dRc, tvec)	
-    euler = np.matmul(dRc, quat2euler(quat).T)
+    euler = np.matmul(dRc, rvec.T)
 
     #quat = tfs.quaternion_multiply(dQuatC, quat)
     #tvec = np.matmul(dRc, tvec.reshape(3,1))
@@ -353,9 +356,9 @@ if __name__ == '__main__':
             Y = np.append(tvec, euler).reshape((6,1))
             U = np.append(drone_linear_vel, drone_angular_vel).reshape((6,1))
             EKF.filter(U,Y)
-            X = EKF.X
+            X = EKF.X.copy()
             filtered_gate_WP = array2WP(X[:3], X[5], "")
-
+            logMeasuredGatePose(X)
             gate_pose_pub.publish(gate_WP)
             filtered_gate_pose_pub.publish(filtered_gate_WP)    
             image_publisher.publish(bridge.cv2_to_imgmsg(img,"bgr8"))

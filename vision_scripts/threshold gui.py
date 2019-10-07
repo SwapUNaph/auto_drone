@@ -95,8 +95,8 @@ video_file = "avi_staying/blue_5m.avi"
 image_file = "vlcsnap-2019-09-12-17h25m19s944.png"
 
 if LIVE:
-	cap = cv2.VideoCapture(folder_name + video_file)
-	#cap = cv2.VideoCapture(0)
+	#cap = cv2.VideoCapture(folder_name + video_file)
+	cap = cv2.VideoCapture(0)
 else:
 	frame = cv2.imread("vlcsnap-2019-09-12-17h25m19s944.png")
 
