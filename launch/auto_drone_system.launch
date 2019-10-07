@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<!--
+<author>Swapneel Naphade</author>
+<email>snaphade@umd.edu</email>
+<version>1.0</version>
+-->
+
+<launch>
+
+	<!-- Launch RVIZ -->
+	<node type="rviz" name="rviz" pkg="rviz" args="-d $(find auto_drone)/rviz/gatedetector_test.rviz" />
+
+	<!-- Launch gate_detector node -->
+	<node pkg="auto_drone" type="gate_detection_and_estimation.py" name="gate_detector" output="screen"/>
+	
+	<!-- Launch main navigation node -->
+	<node pkg="auto_drone" type="main_navigation.py" name="main_navigation" />
+	
+	<!-- Launch bebop driver -->
+	<include file="$(find bebop_driver)/launch/bebop_node.launch"/>
+	
+	<!-- Launch ground output -->
+	<node pkg="bebop_auto" type="ground_output.py" name="ground_output" output="screen"/>
+	
+
+</launch>

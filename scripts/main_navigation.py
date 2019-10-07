@@ -999,7 +999,7 @@ if __name__ == '__main__':
     while True:
 		rospy.loginfo('Controller Loop')
 		update_pose_estimate()
-		update_controller()
+		#update_controller()
 		rate.sleep()
         
 

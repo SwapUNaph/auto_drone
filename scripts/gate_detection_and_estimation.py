@@ -27,18 +27,33 @@ from cv_bridge import CvBridge, CvBridgeError
 
 ######################  Detection Parameters  ##########################
 
-# Gate size in m
+# Gate size in meters
 GATE_SIZE = 1.15
+NOT_GATE_SIZE = 0.8
 
-# HSV thresholds for gate
+
+# HSV thresholds for LED gate
 hsv_thresh_low = (0, 0, 230)
 hsv_thresh_high = (180, 255, 255)
 
+# HSV thresholds for non-LED gate
+not_gate_hsv_thresh_low = (0, 0, 0)
+not_gate_hsv_thresh_high = (180, 255, 100)
+
+# Gate thresholds
+AREA_THRESH = 1000
+ASPECT_RATIO_THRESH_LOW = 0.8 # Should be between 0.0 and 1.0
+ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
+SOLIDITY_THRESH = 0.90
+ROI_MEAN_THRESH = 100
+
 DETECTION_ACTIVE = True
 GATE_TYPE_VERTICAL = None
+
 ########################################################################
 
 ########################### Global Variables  ##########################
+
 # Camera Capture
 cap = cv2.VideoCapture(0)
 cap.set(3, 2560) # Width 2560x720
@@ -52,6 +67,7 @@ drone_position = np.zeros(3)
 drone_orientation = np.zeros(3)
 drone_linear_vel = np.zeros(3)
 drone_angular_vel = np.zeros(3)
+
 ########################################################################
 
 ##########################  Filters   ##################################
@@ -66,10 +82,6 @@ LOOP_FREQ = 60
 PROCESS_NOISE = 0.01	# Variance of process noise
 SENSOR_NOISE = 0.01		# Variance of sensor noise
 
-def logMeasuredGatePose(X):
-    X[3:] = X[3:] * 180.0 / 3.141
-    rospy.loginfo("\nx: {}, y: {}, z: {} (m) \nroll: {}, pitch: {}, yaw: {} (deg)\n".format(X[0],X[1],X[2],X[3],X[4],X[5]))
-    
 def gatePoseDynamics(X,U,dt=1,noise=False):
   v = U[:3].reshape(1,3)
   w = U[3:].reshape(1,3)
@@ -118,6 +130,11 @@ def signal_handler(_, __):
     # enable Ctrl+C of the script
     sys.exit(0)
     
+def logMeasuredGatePose(X):
+    X[3:] = X[3:] * 180.0 / 3.141
+    rospy.loginfo("\nPosition: {} (m) \nOrientation: (deg)\n".format(X[:3],X[3:]))
+    
+    
 def aspectRatio(contour):
     x,y,w,h = cv2.boundingRect(contour)
     return float(w)/h
@@ -143,7 +160,7 @@ def contourROIMean(contour, img):
 
 def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     '''
-    Description: The functiont takes in an image and hsv threshold values, detects 
+    Description: The function takes in an image and hsv threshold values, detects 
                 the largest 4-sided polygon and returns its corner coordinates.
     @params: 
     img: CV2 RGB Image
@@ -151,7 +168,7 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     hsv_threshold_high: High threshold for color detection in HSV format, numpy array of length 3
 
     @return:
-    contour: Numpy array of 4 coordinates of contour corners
+    contour: Numpy array of 4 coordinates of contour corners or None if no gate detected
     '''
     # Convert to HSV
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
@@ -190,19 +207,19 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     #print("Contours before all filters: %d" % len(quadrl))
             
     # Filter contour by area: area > 5 % of image area
-    quadrlFiltered = list(filter(lambda x: (cv2.contourArea(x) > 1000) , quadrl))
+    quadrlFiltered = list(filter(lambda x: (cv2.contourArea(x) > AREA_THRESH) , quadrl))
     #print("Contours after area filter: %d" % len(quadrlFiltered))
 
     # Filter for contour solidity > 0.9
-    quadrlFiltered = list(filter(lambda x: (solidity(x) > 0.50) , quadrlFiltered))
+    quadrlFiltered = list(filter(lambda x: (solidity(x) > SOLIDITY_THRESH) , quadrlFiltered))
     #print("Contours after solidity filter: %d" % len(quadrlFiltered))
 
     # Filter by contour aspect ratio: 1.20 > AR > 0.8
-    quadrlFiltered = list(filter(lambda x: (aspectRatio(x) > 0.8) & (aspectRatio(x) < 1.25) , quadrlFiltered))
+    quadrlFiltered = list(filter(lambda x: (aspectRatio(x) > ASPECT_RATIO_THRESH_LOW) & (aspectRatio(x) < ASPECT_RATIO_THRESH_HIGH) , quadrlFiltered))
     #print("Contours after aspect ratio filter: %d" % len(quadrlFiltered))
 
     # Filter by contour mean
-    quadrlFiltered = list(filter(lambda x: contourROIMean(x, blur) < 100 , quadrlFiltered))
+    quadrlFiltered = list(filter(lambda x: contourROIMean(x, blur) < ROI_MEAN_THRESH , quadrlFiltered))
     #print("Contours after aspect ratio filter: %d" % len(quadrlFiltered))
 
     #print("Square contour areas:")
@@ -241,8 +258,19 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
         return None
 
 def getGatePose(contour, gate_side):
+     '''
+    Description: The function takes in gate contour points in counter clockwise direction starting from
+                top left corner and dimensions of gate side and outputs the relative positin of the gate    
+                wrt drone.
+    @params: 
+    contour: 4x2 numpy array of contour points
+    gate_side: Gate side dimension (preferably in meters)
 
-    #gate_side = 1.15
+    @return:
+    (tvec, euler): translation vector and euler angles (in radians) of the gate center 
+                    wrt drone (NWU coordinate system).
+    '''
+
     objectPoints = np.array([
             (-gate_side/2, -gate_side/2, 0.0),
             (-gate_side/2, gate_side/2, 0.0),
@@ -250,17 +278,14 @@ def getGatePose(contour, gate_side):
             (gate_side/2, -gate_side/2, 0.0)
         ])
 
-    ##Camera Transformation wrt drone
+    #Camera Transformation wrt drone
     dRc = np.array([[0,0,1],[-1,0,0],[0,-1,0]])
-    #dTc = np.array([[0,0,1,0],[-1,0,0, 0],[0,-1,0, 0], [0,0,0,1]])
-    #dQuatC = tfs.quaternion_from_matrix(dTc)
-    #dQuatC = [ 0.5, -0.5, 0.5, -0.5 ]
 
-    ###################################  Camera matrix and distortion coefficients for CaliCam    ##################################
+    ##########################  Camera matrix and distortion coefficients for CaliCam    ##################################
     # cameraMatrix = np.array([[ 258.58131479, 0.0 , 348.1852167 ], [0.0 , 257.25344992, 219.07752178], [0.0 , 0.0, 1.0]])
     # distCoeffs = np.array([[-0.36310169,  0.10981468,  0.0057042,  -0.001884,   -0.01328491]])
 
-    ################################################################################################################################
+    #######################################################################################################################
 
     ####################################   For ZED stereo   #########################################################
     ## Camera Matrix 720p 
@@ -286,18 +311,16 @@ def getGatePose(contour, gate_side):
     tvec = np.matmul(dRc, tvec)	
     euler = np.matmul(dRc, rvec.T)
 
-    #quat = tfs.quaternion_multiply(dQuatC, quat)
-    #tvec = np.matmul(dRc, tvec.reshape(3,1))
-
-    #print("Position(m):\t{}\nAngle(deg):\t{}\n-----------------------".format(tvec, euler))
-
-    return (euler, tvec)
+    return (euler, tvec) # euler angles in radians
 
 def drone_odometry_callback(corrected_drone_pose):
 	global drone_position, drone_orientation, drone_linear_vel, drone_angular_vel
 	drone_position, drone_orientation  =  pose2array(corrected_drone_pose.pos)
 	drone_orientation = quat2euler(drone_orientation)
 	drone_linear_vel, drone_angular_vel = twist2array(corrected_drone_pose.vel)
+
+
+
 
 if __name__ == '__main__':
 
@@ -336,6 +359,7 @@ if __name__ == '__main__':
             
             # Gate detection
             gate = detect_gate(img, hsv_thresh_low, hsv_thresh_high)
+            
             # If gate detected succesfully
             if gate is not None and np.array_equal(gate.shape, [4,2]):
                 cv2.drawContours(img, [gate.reshape(4,2)], 0, (255, 0, 0), 2)
@@ -350,7 +374,6 @@ if __name__ == '__main__':
 				tvec = np.zeros(3)
 				gate_WP = WP_Msg()
 				EKF.C = np.zeros((6,6), float) # No measurements, rely only on prediction
-
                 
 			# Kalman Filtering
             Y = np.append(tvec, euler).reshape((6,1))
@@ -358,6 +381,7 @@ if __name__ == '__main__':
             EKF.filter(U,Y)
             X = EKF.X.copy()
             filtered_gate_WP = array2WP(X[:3], X[5], "")
+            
             logMeasuredGatePose(X)
             gate_pose_pub.publish(gate_WP)
             filtered_gate_pose_pub.publish(filtered_gate_WP)    

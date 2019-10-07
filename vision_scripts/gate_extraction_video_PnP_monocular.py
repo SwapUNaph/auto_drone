@@ -138,7 +138,7 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
 
     # Blur 
     blur = cv2.GaussianBlur(mask,(5,5), 3)
-    #cv2.imshow('Blur', blur)
+    cv2.imshow('Blur', blur)
 
     # Find contours
     contours, hierarchy = cv2.findContours(blur, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
@@ -164,7 +164,7 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     #print("Contours before all filters: %d" % len(quadrl))
             
     # Filter contour by area: area > 5 % of image area
-    quadrlFiltered = list(filter(lambda x: (cv2.contourArea(x) > 500) , quadrl))
+    quadrlFiltered = list(filter(lambda x: (cv2.contourArea(x) > 1000) , quadrl))
     #print("Contours after area filter: %d" % len(quadrlFiltered))
 
     # Filter for contour solidity > 0.9
@@ -172,11 +172,11 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     #print("Contours after solidity filter: %d" % len(quadrlFiltered))
 
     # Filter by contour aspect ratio: 1.20 > AR > 0.8
-    quadrlFiltered = list(filter(lambda x: (aspectRatio(x) > 0.5) & (aspectRatio(x) < 2.0) , quadrlFiltered))
+    quadrlFiltered = list(filter(lambda x: (aspectRatio(x) > 0.9) & (aspectRatio(x) < 1.11) , quadrlFiltered))
     #print("Contours after aspect ratio filter: %d" % len(quadrlFiltered))
 
     # Filter by contour mean
-    quadrlFiltered = list(filter(lambda x: contourROIMean(x, blur) < 150 , quadrlFiltered))
+    quadrlFiltered = list(filter(lambda x: contourROIMean(x, blur) < 50 , quadrlFiltered))
     #print("Contours after aspect ratio filter: %d" % len(quadrlFiltered))
 
     #print("Square contour areas:")
@@ -187,7 +187,7 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     quadrlFiltered = sorted(quadrlFiltered, key=lambda x: cv2.contourArea(x))
 
     if len(quadrlFiltered) > 0:
-        gate_contour = quadrlFiltered[-1].reshape(4,2)
+        gate_contour = quadrlFiltered[0].reshape(4,2)
         
         # Sort the points starting with top left and going anti-clockwise
         center = gate_contour.mean(axis=0)
@@ -315,7 +315,7 @@ def main():
             (gate_side/2, -gate_side/2, 0.0)
         ])
     
-    cap = cv2.VideoCapture("videos/avi_fast/red_moving_fast.avi")
+    cap = cv2.VideoCapture("videos/avi_fast/blue_moving_fast.avi")
     #cap = cv2.VideoCapture(0)
     
     # 2.2K : 4416x1242 : 15 FPS
@@ -332,7 +332,7 @@ def main():
     frame_height = int(cap.get(4))
     print(frame_width, frame_height)
     
-    VIDEO_RECORDING = True
+    VIDEO_RECORDING = False
          
     if VIDEO_RECORDING:
         # Define the codec and create VideoWriter object.The output is stored in 'outpy.avi' file.
@@ -364,8 +364,8 @@ def main():
     #hsv_thresh_high = (196, 202, 206)
     
     #All color LEDs : 0 0 191 180 255 255
-    hsv_thresh_low = (0, 0, 200)
-    hsv_thresh_high = (180, 255, 255)
+    hsv_thresh_low = (0, 0, 0)
+    hsv_thresh_high = (180, 150, 100)
     
     # MVA filters
     orntFilter = MVA(15)
