@@ -14,9 +14,9 @@ import numpy as np
 import time
 from std_msgs.msg import Int32, String, Float32MultiArray, Bool, Float32, Empty
 from bebop_msgs.msg import Ardrone3PilotingStateFlyingStateChanged
-from auto_drone.msg import Gate_Detection_Msg, WP_Msg, Drone_Pose
+from auto_drone.msg import Detection_Active, WP_Msg, Drone_Pose
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, Twist, Quaternion, Point
 from tf import transformations as tfs
 import common_resources as cr
 
@@ -47,6 +47,10 @@ def callback_states_changed(data, args):
 def callback_visual_gate_detection_changed(data):
     global wp_average
     global wp_input_history
+    
+    gate_position, gate_hdg = cr.WP2array(data)
+    
+    
     
     # detection must be active
     if not detection_active:
@@ -687,7 +691,7 @@ def callback_bebop_odometry_changed(data):
     bebop_pose = data.pose.pose.position
     quat = data.pose.pose.orientation
     bebop_hdg = tfs.euler_from_quaternion([quat.x, quat.y, quat.z, quat.w])[2]
-    rospy.loginfo('Odom recieved'str([bebop_pose.x, bebop_pose.y, bebop_pose.z, bebop_hdg]))
+    rospy.loginfo("Odom recieved: " + str([bebop_pose.x, bebop_pose.y, bebop_pose.z, bebop_hdg]))
 
 
     global bebop_model
@@ -965,14 +969,14 @@ if __name__ == '__main__':
     states[33] = State(33, 10, "dist",  exit_thrs,    0, 0, p, None, [dist_egw, 0, 0], [dist_egw, 0, 0])
     '''
 
-    states[90] = State(90, 91, "bebop", cr.Bebop.LANDING,  0, 0, o, None, None, None)									# land
-    states[91] = State(91, 91, "bebop", cr.Bebop.LANDED,   0, 0, o, None, None, None)       							# landed
+    states[90] = State(90, 91, "bebop", cr.Bebop.LANDING,  0, 0, o, None, None, None)		# land
+    states[91] = State(91, 91, "bebop", cr.Bebop.LANDED,   0, 0, o, None, None, None)       # landed
 
     # Subscribers
     rospy.Subscriber("/auto/state_auto", Int32, callback_states_changed, "state_auto")
     rospy.Subscriber("/auto/autonomy_active", Bool, callback_states_changed, "autonomy")
     rospy.Subscriber("/bebop/odom", Odometry, callback_bebop_odometry_changed)
-    rospy.Subscriber("/auto/gate_detection_result", Gate_Detection_Msg, callback_visual_gate_detection_changed)
+    rospy.Subscriber("/auto/filtered_gate_WP", WP_Msg, callback_visual_gate_detection_changed)
     rospy.Subscriber("/bebop/states/ardrone3/PilotingState/FlyingStateChanged", Ardrone3PilotingStateFlyingStateChanged,callback_states_changed, "state_bebop")
     rospy.Subscriber("/auto/emergency_shutdown", Empty, emergency_shutdown)
 
@@ -995,8 +999,8 @@ if __name__ == '__main__':
 
         
 
-    rate = rospy.Rate(20)
-    while True:
+    rate = rospy.Rate(60)
+    while not rospy.is_shutdown():
 		rospy.loginfo('Controller Loop')
 		update_pose_estimate()
 		#update_controller()

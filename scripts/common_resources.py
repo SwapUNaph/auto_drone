@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 # Script developed by Vincenz Frenzel (PIDs by Derek Thompson, frequency extraction by Matt Vaughn,
-#					orientation conversions, Kalman Filter and MVA filter by Swapneel Naphade)
+#					orientation conversions, Kalman Filter, Extended Kalman Filter and MVA filter by Swapneel Naphade)
 #  --- Changelog ---
 # Goal:     Collect information that is needed at multiple locations of other scripts or that are less essential
 # Status:   11/03/18: Started changelog and commented code
@@ -10,7 +10,7 @@
 import math
 from tf import transformations as tfs
 from geometry_msgs.msg import Twist, Pose, Quaternion, Point
-from auto_drone.msg import WP_Msg, Drone_Pose
+from auto_drone.msg import WP_Msg, Drone_Pose, Detection_Active
 import numpy as np
 
 # Convert WP_Msg to array
