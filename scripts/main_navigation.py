@@ -45,180 +45,33 @@ def callback_states_changed(data, args):
 
 # no idea what todo here
 def callback_visual_gate_detection_changed(data):
-    global wp_average
-    global wp_input_history
     
     gate_position, gate_hdg = cr.WP2array(data)
     
-    
-    
-    # detection must be active
-    if not detection_active:
-        rospy.loginfo("detection not active")
-        return
+    if data.gate_format == 'undetermined':
+        pass
 
-    # content must not be empty
-    if data.tvec == ():
-        rospy.loginfo("empty visual input")
-        return
-    
-    '''
-    # read data
-    bebop_position = data.bebop_pose.position
-    bebop_orientation = data.bebop_pose.orientation
-    
-    # bebop position and orientation
-    bebop_p = np.array([bebop_position.x, bebop_position.y, bebop_position.z])
-    bebop_q = np.array([bebop_orientation.x, bebop_orientation.y, bebop_orientation.z, bebop_orientation.w])
+    else:    
+        global current_gate
+        if current_gate is not None:
 
-    # gate position and orientation
-    # rospy.loginfo("tvec")
-    # rospy.loginfo(data.tvec)
-    # rospy.loginfo("rvec")
-    # rospy.loginfo(data.rvec)
+            if data.gate_format == 'left' and current_gate.gate_orientation == 'horizontal':
+                current_gate.update('left')
+            elif data.gate_format == 'right' and current_gate.gate_orientation == 'horizontal':
+                current_gate.update('right')
 
-    gate_pos = np.array(data.tvec)
-    gate_q = cr.axang2quat(np.array(data.rvec))
-    #
-    # rospy.loginfo("bebop_p")
-    # rospy.loginfo(bebop_p)
-    # rospy.loginfo("bebop_q")
-    # rospy.loginfo(bebop_q)
-    # rospy.loginfo("gate_pos")
-    # rospy.loginfo(gate_pos)
-    # rospy.loginfo("gate_q")
-    # rospy.loginfo(gate_q)
+            if data.gate_format == 'top' and current_gate.gate_orientation == 'vertical':
+                current_gate.update('top')
+            elif data.gate_format == 'bottom' and current_gate.gate_orientation == 'vertical':
+                current_gate.update('bottom')
 
-    # transform measurement into global frame, calculate headings
-    # headings are required to make sure gate is not backwards (it is 1*pi periodic so could be wrong way round)
-    gate_global_p = cr.qv_mult(bebop_q, cr.qv_mult(cr.cam_q, gate_pos) + cr.BZ) + bebop_p
-    gate_global_q = tfs.quaternion_multiply(bebop_q, tfs.quaternion_multiply(cr.cam_q, gate_q))
-    gate_normal_vec = cr.qv_mult(gate_global_q, [0, 0, 1])
-    heading_to_gate = math.atan2((gate_global_p[1] - bebop_p[1]), gate_global_p[0] - bebop_p[0])
-    heading_of_gate = math.atan2(gate_normal_vec[1], gate_normal_vec[0])
-    heading_difference = math.fabs(heading_to_gate - heading_of_gate) * 180 / math.pi
-    
-    # rospy.loginfo("gate_global_p")
-    # rospy.loginfo(gate_global_p)
-    # rospy.loginfo("gate_global_q")
-    # rospy.loginfo(gate_global_q)
-    # rospy.loginfo("gate_normal_vec")
-    # rospy.loginfo(gate_normal_vec)
-
-    if 90 < heading_difference < 270:
-        if heading_of_gate < 0:
-            heading_of_gate = heading_of_gate + math.pi
         else:
-            heading_of_gate = heading_of_gate - math.pi
+            rospy.loginfo('Error: current_gate not initialized correctly')
+        
+   
 
-    # accept info as current WP. publish for ground control station
-    wp_current = cr.WP(gate_global_p, heading_of_gate)
-    msg = WP_Msg()
-    msg.pos.x = wp_current.pos[0]
-    msg.pos.y = wp_current.pos[1]
-    msg.pos.z = wp_current.pos[2]
-    msg.hdg = wp_current.hdg
-    publisher_wp_current.publish(msg)
 
-    rospy.loginfo("new measured wp_current")
-    rospy.loginfo(wp_current)
-
-    # while there is no average yet: collect gate positions
-    if wp_average is None:
-        wp_input_history.append(wp_current)
-        # once enough measurements are there, delete oldest ones
-        if len(wp_input_history) > 15:
-            rospy.loginfo("enough measurements")
-            del wp_input_history[0]
-            # calculate average of measurements (average position and angle)
-            average = cr.find_average(wp_input_history)
-            # calculate std deviation of positions
-            std_deviation = cr.find_std_dev_waypoints(average, wp_input_history)
-            # when std dev is low enough, provide waypoint ("lock on" to average gate)
-            if std_deviation < 0.25:
-                rospy.loginfo("measurements accepted")
-                wp_average = average
-            else:
-                rospy.loginfo("standard deviation too high:")
-                rospy.loginfo(std_deviation)
-        else:
-            # not enough measurements yet
-            std_deviation = 5
-            average = cr.WP([0, 0, 0], 0)
-            rospy.loginfo("collecting measurements")
-
-        # logging for matlab
-        log_string = str(wp_current.pos[0]) + ", " + \
-            str(wp_current.pos[1]) + ", " + \
-            str(wp_current.pos[2]) + ", " + \
-            str(wp_current.hdg) + ", " + \
-            str(average.pos[0]) + ", " + \
-            str(average.pos[1]) + ", " + \
-            str(average.pos[2]) + ", " + \
-            str(average.hdg) + ", " + \
-            str(bebop_p[0]) + ", " + \
-            str(bebop_p[1]) + ", " + \
-            str(bebop_p[2]) + ", " + \
-            str(bebop_q[3]) + ", " + \
-            str(bebop_q[0]) + ", " + \
-            str(bebop_q[1]) + ", " + \
-            str(bebop_q[2]) + ", " + \
-            str(heading_to_gate) + ", " + \
-            str(std_deviation) + ", " + \
-            str(1.0) + ", " + \
-            str(time.time()-t_log)
-    else:
-        # now, average is established
-        # add measurement to list only if gate position and hdg is close to average
-        distance = np.linalg.norm(wp_current.pos - wp_average.pos)
-        hdg_diff = abs(math.atan2(math.sin(wp_current.hdg - wp_average.hdg), math.cos(wp_current.hdg - wp_average.hdg)))
-        if distance < 0.4 and hdg_diff < 15*math.pi/180:
-            # measurements are accepted. update history and recalculate average
-            rospy.loginfo("use detected gate")
-            wp_input_history.append(wp_current)
-            del wp_input_history[0]
-            wp_average = cr.find_average(wp_input_history)
-            rospy.loginfo("wp_average")
-            rospy.loginfo(wp_average)
-        else:
-            # measurement rejected
-            rospy.loginfo("discard detected gate")
-
-        # logging for matlab
-        log_string = str(wp_current.pos[0]) + ", " + \
-            str(wp_current.pos[1]) + ", " + \
-            str(wp_current.pos[2]) + ", " + \
-            str(wp_current.hdg) + ", " + \
-            str(wp_average.pos[0]) + ", " + \
-            str(wp_average.pos[1]) + ", " + \
-            str(wp_average.pos[2]) + ", " + \
-            str(wp_average.hdg) + ", " + \
-            str(bebop_p[0]) + ", " + \
-            str(bebop_p[1]) + ", " + \
-            str(bebop_p[2]) + ", " + \
-            str(bebop_q[3]) + ", " + \
-            str(bebop_q[0]) + ", " + \
-            str(bebop_q[1]) + ", " + \
-            str(bebop_q[2]) + ", " + \
-            str(heading_to_gate) + ", " + \
-            str(distance) + ", " + \
-            str(2.0) + ", " + \
-            str(time.time()-t_log)
-
-    publisher_visual_log.publish(log_string)
-
-    # WP for ground control station
-    msg = WP_Msg()
-    if wp_average is not None:
-        msg.pos.x = wp_average.pos[0]
-        msg.pos.y = wp_average.pos[1]
-        msg.pos.z = wp_average.pos[2]
-        msg.hdg = wp_average.hdg
-    publisher_wp_average.publish(msg)
-
-    rospy.loginfo("visual gate done")
-
-    '''
+    pass
 
 
 # needs work
@@ -552,13 +405,14 @@ def calculate_distance():
 class State:
     # This is the ominous state machine
     def __init__(self, own_state=None, next_state=None, condition_type=None, condition_thres=None,
-                 exit_clear_visual=None, detection_active_bool=None, nav_active_str=None,
-                 gate_color=None, fly=None, look=None,gate_orientation=None):
+                 exit_clear_visual=None, exit_clear_gate=None, detection_active_bool=None, nav_active_str=None,
+                 gate_color=None, fly=None, look=None,gate_orientation=None,gate_current=None):
         self.own_state = own_state                              # own state id
         self.next_state = next_state                            # next state id
         self.condition_type = condition_type                    # type of state advancement
         self.condition_thres = condition_thres                  # value for state advancement (not req. for all)
         self.exit_clear_visual = bool(exit_clear_visual)        # on state exit, clear all visual data? (new gate)
+        self.exit_clear_visual = bool(exit_clear_gate)          # on state exit, reset current gate
         self.detection_active = bool(detection_active_bool)     # detection active?
         self.nav_active = nav_active_str                        # which navigation should be active
         self.gate_color = gate_color                            # color of the gate
@@ -566,7 +420,8 @@ class State:
         self.look = look                                        # flying and looking waypoint into gate direction
         self.time = None                                        # timer for takeoff wait
         self.gate_orientation = gate_orientation                # If it needs to guess the gate
-		
+		self.current_gate = gate_current                        # on enter, set current_gate to the correct gate class variable
+
     def enter(self):
         # do things when state is selected
         print("enter state " + str(self.own_state))
@@ -578,12 +433,6 @@ class State:
         # reset all PID loops
         nav_PID_z.reset()
         nav_PID_r.reset()
-        # na
-        # nav_through_PID_y_pos.reset()
-        # nav_through_PID_x_vel.reset()
-        # nav_through_PID_y_vel.reset()
-        # nav_through_PID_z_vel.reset()
-        # nav_through_PID_r_vel.reset()
 
         # if timer is required for condition, start timer
         if self.condition_type == "time":
@@ -604,26 +453,19 @@ class State:
         global detection_active
         detection_active = self.detection_active
 
-        # # calculate blind waypoints
-        # if self.fly.any():
-        #     rospy.loginfo("state " + str(self.own_state) + ": set blind waypoint")
-        #     calculate_blind_waypoint(self.fly, self.look)
 
-
-        if self.gate_orientation is not None:
-            if self.gate_orientation == 'vertical':
-                pass
-
-            elif gate_orientation == 'horizontal':
-                pass
+        # Initialize current gate to gate found
+        if self.current_gate is not None:
+            global current_gate
+            current_gate = self.current_gate
 
 
         # publish blind WP for ground control station
         if self.look is not None:
             msg = WP_Msg()    
-            msg.pos.x = self.look[0]
-            msg.pos.y = self.look[1]
-            msg.pos.z = self.look[2]
+            msg.pos.x = self.look.pos[0]
+            msg.pos.y = self.look.pos[1]
+            msg.pos.z = self.look.pos[2]
             msg.hdg = 0
             publisher_wp_look.publish(msg)
 
@@ -649,10 +491,11 @@ class State:
 
         # if visuals should be cleared, do it now (preparation for next gate)
         if self.exit_clear_visual:
-            global wp_average
-            global wp_input_history
-            wp_average = None
-            wp_input_history = []
+            pass
+
+        if self.exit_clear_gate:
+            global current_gate
+            current_gate.reset()
 
         # enter new state
         states[self.next_state].enter()
@@ -696,10 +539,8 @@ def callback_bebop_odometry_changed(data):
 
     global bebop_model
     global nav_active
-    global bebop_last_known_hdg
-    global bebop_last_known_pos
     global bebop_odometry
-    
+    global bebop_last_odom_time
 
 
 
@@ -708,12 +549,16 @@ def callback_bebop_odometry_changed(data):
         rospy.loginfo("No position")
         rospy.loginfo("publish empty driving msg")
         publisher_auto_drive.publish(Twist())
+        
+        bebop_last_odom_time = time.time()
         bebop_odometry = data
         return
 
     if current_state is None:
         rospy.loginfo("No State")
         publisher_auto_drive.publish(Twist())
+
+        bebop_last_odom_time = time.time()
         bebop_odometry = data
         return        
 
@@ -734,9 +579,17 @@ def callback_bebop_odometry_changed(data):
 
     # Send out bebops estimated position
     publisher_pose.publish(bebop_model.pose)
+
+    bebop_odometry = data
+    bebop_last_odom_time = time.time()
+    
+    
     
 
 def update_last_known_bebop(odom):
+    
+    global bebop_last_known_hdg
+    global bebop_last_known_pos
 
     pos = odom.pose.pose.position
     quat = odom.pose.pose.orientation
@@ -844,21 +697,17 @@ if __name__ == '__main__':
     track_last_known_pos = start_pos
     track_last_known_hdg = start_hdg
 
-    state_auto = 0                                             # initialize state machine (number of state)
+    state_auto = 0                                              # initialize state machine (number of state)
     current_state = None                                        # the actual state object with method "check"
     state_bebop = None                                          # state of drone itself (own state machine)
     
 
-    gate_filtered = None                                        # Filtered gate input from gate detection
-   
-
-
-    wp_visual = None                                            # almost same as above (see calculate_visual_wp)
-    wp_visual_old = None                                        # backup of last visual wp
-    wp_input_history = []                                       # history of gate measurements
-    wp_blind = None                                             # wp calculated from map layout
-    wp_blind_old = None                                         # backup of last blind wp
+    current_gate = None
     
+    gate_filtered = None                                        # Filtered gate input from gate detection
+    bebop_last_odom_time = None                                 # Time log of the last bebop_odom data
+    
+
     
     
     detection_active = False                                    # gate detection active boolean
@@ -929,33 +778,31 @@ if __name__ == '__main__':
 
     
     start_pos = cr.WP(np.array([0.7, 5, 0]),None)
-
-    gate_wp_1 = cr.WP(np.array([-0.7, 0.0, 1.7]),-np.pi/2)
-    gate_wp_2 = cr.WP(np.array([1.4, 13, 1.7]),np.pi/2)
     
-    look_pos_1 = cr.WP(np.array([-0.7, 7, 1.7]),None)
-    look_pos_2 = cr.WP(np.array([1.4, 6, 1.7]),None)
-
-    far_pos_1 = cr.WP(np.array([-0.7, -dist_exit_gate_wp, 1.7]),None)
-    far_pos_2 = cr.WP(np.array([0.7, 13+dist_exit_gate_wp, 1.7]),None)
 
     turn_pos_1 = cr.WP(np.array([2.0, -1.25, 1.7]),None)
     turn_pos_2 = cr.WP(np.array([-1.5, 14.25, 1.7]),None)
+    
+    gate_1 = cr.Gate(h,np.array([1.4, 10.0, 1.7]),np.pi/2)
+    gate_2 = cr.Gate(v,np.array([-0.7, 0.0, 1.7]),-np.pi/2)
 
-    # own_state, next_state, condition_type, condition_thres, exit_clear_visual, detection_active_type, nav_active_str, gate_color, fly, look 
+
+
+    # own_state, next_state, condition_type, condition_thres, exit_clear_visual, reset_gate, detection_active_type, nav_active_str, gate_color, fly, look, gate)
     
     states = [State()] * 100
     # states[02] = State(02, 03, "bebop", cr.Bebop.TAKEOFF,  0, 0, o, None, None, None)                                  # Landed
     # states[03] = State(03, 04, "bebop", cr.Bebop.HOVERING, 0, 0, o, None, None, None)                                  # Taking off
     # states[04] = State(04, 10, "time",  1.0,               0, 0, o, None, None, None)                                  # Hovering
 
-    states[10] = State(10, 90, "dist",  0.4,               0, 0, p, None, look_pos_1, gate_wp_1)				         # testing 
+    states[10] = State(10, 90, "dist",  0.4,               0, 0, 0, p, None,           gate_1.look_pos,        gate_1.pos,         None)                   # testing 
 
 
-    states[11] = State(11, 12, "wp",    None,              0, v, p, gate_params1, look_pos_1, gate_wp_1)                 # Move and Look for gate
-    states[12] = State(12, 13, "dist",  dist_gate_close,   1, v, t, gate_params1, None, None)                            # move through gate until cant see it
-    states[13] = State(13, 14, "dist",  exit_thrs,         0, 0, p, None, far_pos_1, turn_pos_1)                         # Move through gate
-    states[14] = State(14, 21, "dist",  dist_gate_blind,   0, 0, p, None, turn_pos_1, gate_wp_2)                         # Turn around manuever
+    states[11] = State(11, 12, "wp",    None,              0, 0, v, p, gate_params1,   gate_1.look_pos,        gate_1.pos,         gate_1)                 # Move and Look for gate
+    states[12] = State(12, 13, "dist",  dist_gate_close,   1, 0, v, t, gate_params1,   gate_1.pos,             gate_1.pos,         gate_1)                 # move through gate until cant see it
+    states[13] = State(13, 14, "dist",  exit_thrs,         0, 1, 0, p, None,           gate_1.exit_pos,        turn_pos_1,         None)                   # Move through gate
+    states[14] = State(14, 90, "dist",  dist_gate_blind,   0, 0, 0, p, None,           turn_pos_1,             gate_2.pos,         None)                   # Turn around manuever
+
 
     '''
     states[20] = State(20, 21, "dist",  dist_gate_blind,   0, 0, p, None, [1.7, 0, 0], [5.0, 0, 0])               
@@ -969,9 +816,9 @@ if __name__ == '__main__':
     states[33] = State(33, 10, "dist",  exit_thrs,    0, 0, p, None, [dist_egw, 0, 0], [dist_egw, 0, 0])
     '''
 
-    states[90] = State(90, 91, "bebop", cr.Bebop.LANDING,  0, 0, o, None, None, None)		# land
-    states[91] = State(91, 91, "bebop", cr.Bebop.LANDED,   0, 0, o, None, None, None)       # landed
-
+    states[90] = State(90, 91, "bebop", cr.Bebop.LANDING,  0, 0, 0, o, None, None, None, None)      # land
+    states[91] = State(91, 91, "bebop", cr.Bebop.LANDED,   0, 0, 0, o, None, None, None, None)      # landed
+    
     # Subscribers
     rospy.Subscriber("/auto/state_auto", Int32, callback_states_changed, "state_auto")
     rospy.Subscriber("/auto/autonomy_active", Bool, callback_states_changed, "autonomy")

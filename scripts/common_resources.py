@@ -266,6 +266,53 @@ class WP:
         return str(list(self.pos) + [self.hdg])
 
 
+class Gate:
+    def __init__(self,gate_format,center_pos,hdg):
+
+
+        self.pos = WP(np.array(center_pos),None)
+        self.org_pos = WP(self.pos.pos,None)
+        self.hdg = hdg        
+        self.format = gate_format
+        self.current_gate = None
+
+        self.look_pos = WP(self.pos.pos - 5.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
+        self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
+
+
+
+    def reset(self):
+        self.pos = self.org_pos
+        self.current_gate = None
+        self.look_pos = WP(self.org_pos.pos - 5.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
+        self.exit_pos = WP(self.org_pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
+
+        
+    def updatte_format(self,gate_format):
+
+        if self.format == 'vertical' and gate_format == 'top':
+            self.current_gate = gate_format
+            self.pos = self.org_pos + np.array([0,0,.7])
+            self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
+        
+
+        elif self.format == 'vertical' and gate_format == 'bottom':
+            self.current_gate = gate_format
+            self.pos = self.org_pos - np.array([0,0,.7])
+            self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
+
+
+        elif self.format == 'horizontal' and gate_format == 'left':
+            self.current_gate = gate_format
+            self.pos = self.org_pos + np.array([0.7,0.0,0.0])
+            self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
+
+
+        elif self.format == 'horizontal' and gate_format == 'right':
+            self.current_gate = gate_format
+            self.pos = self.org_pos - np.array([0.7,0.0,0.0])
+            self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
+        
 
 class Bebop_Model:
     def __init__(self,pos,hdg):
