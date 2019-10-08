@@ -26,6 +26,7 @@ def signal_handler(_, __):
     sys.exit(0)
 
 
+
 def callback_states_changed(data, args):
     # update states, either autonomy state or bebop state
     if args == "state_auto":
@@ -43,7 +44,7 @@ def callback_states_changed(data, args):
 
 
 
-# no idea what todo here
+# figuring this out
 def callback_visual_gate_detection_changed(data):
     
     gate_position, gate_hdg = cr.WP2array(data)
@@ -68,13 +69,13 @@ def callback_visual_gate_detection_changed(data):
         else:
             rospy.loginfo('Error: current_gate not initialized correctly')
         
-   
 
 
     pass
 
 
-# needs work
+
+# needs overhaul
 def navigate_through():
     # navigation algorithm to carry us onto the centerline and up to the gate, all navigation written by Derek
     bebop_position = bebop_odometry.pose.pose.position
@@ -214,7 +215,7 @@ def navigate_through():
 
 
 
-# needs fix to pose get
+# needs to be more aggresive
 def navigate_point():
 	
     # navigation algorithm to fly us to WPs    
@@ -371,6 +372,7 @@ def navigate_point():
     return msg
 
 
+
 # need to fix distance through nav
 def calculate_distance():
     # calculate a distance based on which navigation is active
@@ -400,7 +402,6 @@ def calculate_distance():
         return flat_distance * math.cos(heading_difference)
 
         
-
 
 class State:
     # This is the ominous state machine
@@ -572,6 +573,7 @@ def callback_bebop_odometry_changed(data):
     if nav_active == "off" or  nav_active == "point":
         bebop_odom_transformed = bebop2track_transform_odom(data)
         bebop_model.update_odom(bebop_odom_transformed)
+        bebop_model.update_body_vel(data.twist.twist.linear)
 
     elif nav_active == 'through':
         pass
@@ -585,7 +587,6 @@ def callback_bebop_odometry_changed(data):
     
     
     
-
 def update_last_known_bebop(odom):
     
     global bebop_last_known_hdg
@@ -596,6 +597,7 @@ def update_last_known_bebop(odom):
 
     bebop_last_known_pos = np.array([pos.x, pos.y, pos.z])
     bebop_last_known_hdg = tfs.euler_from_quaternion([quat.x, quat.y, quat.z, quat.w])[2]
+
 
 
 def bebop2track_transform_odom(bebop_odom):
@@ -631,6 +633,7 @@ def bebop2track_transform_odom(bebop_odom):
     return track_odom
 
 
+
 def update_pose_estimate():
     #global nav_active
     #global bebop_model
@@ -652,6 +655,7 @@ def update_pose_estimate():
     current_state.check(navigation_distance)
 
 
+
 def update_controller():
     
     if nav_active == "off":
@@ -671,10 +675,12 @@ def update_controller():
         publisher_auto_drive.publish(auto_driving_msg)
         
 
+
 def emergency_shutdown(_):
     # if this is triggered, it shuts off node for performance reasons
     rospy.loginfo("emergency shutdown")
     rospy.signal_shutdown("emergency shutdown")
+
 
 
 if __name__ == '__main__':
@@ -687,9 +693,9 @@ if __name__ == '__main__':
     # Variables
     autonomy_active = False                                     # autonomous mode is active
     
-    start_pos = np.array([.7, 5, 0])
-    start_hdg = -3.1415/2
-    bebop_model = cr.Bebop_Model(start_pos,start_hdg)            # Initialize odometry message to store position
+    start_pos = np.array([-.7, 5, 0])
+    start_hdg = -np.pi/2
+    bebop_model = cr.Bebop_Model(start_pos,start_hdg)           # Initialize odometry message to store position
 
     bebop_odometry = None                                       # latest odometry from bebop
     bebop_last_known_pos = None                                 # keep track of last known position of bebop for tranform to track frame
@@ -706,7 +712,7 @@ if __name__ == '__main__':
     
     gate_filtered = None                                        # Filtered gate input from gate detection
     bebop_last_odom_time = None                                 # Time log of the last bebop_odom data
-    
+        
 
     
     
@@ -714,53 +720,48 @@ if __name__ == '__main__':
     nav_active = "off"                                          # activated navigation algorithm
     
     
-    # Controller Classes
+
+    # PID Controller Classes
     nav_PID_z = cr.PID(1.0, 0, 0.0)
     nav_PID_r = cr.PID(0.5, 0, 1.0)
-    
+        
+
 
     # Controller Params
-    nav_limit_x_thr = .1  # .25                                 # absolute limit to all cmd before being sent, thr_nav
-    nav_limit_y_thr = .2  # .4
-    nav_limit_z = .5  # .75
-    nav_limit_r = 1.0  # 1
-
-    point_time_proj = 0.7
-    point_nav_des_vel = 1.5
-    point_vel_slope = 2.0
-    point_lateral_gain = 1.0
-    point_nav_limit_lat = .3
-    point_nav_limit_z = .2
-    point_nav_limit_r = .8
+    thr_nav_limit_lat = .1                                      # absolute limit to all cmd before being sent, thr_nav
     
-    nav_drag = 0.0
+    point_time_proj = 0.7                                       # acceleration response time 
+    point_nav_des_vel = 1.5                                     # max calculated velocity
+    point_vel_slope = 2.0                                       # Desired vel slope
+    point_lateral_gain = 1.0                                    # Lateral command gain
+    
+    point_nav_limit_lat = .3                                    # lateral command limit
+    point_nav_limit_z = .2                                      # Z command limit
+    point_nav_limit_r = .8                                      # R command limit
+    
+    nav_drag = 0.0                                              # Drag acceleration term
 
 
     dist_gate_blind = 1.0                                       # how exact go to blind wp before advancing state
     dist_gate_close = 0.5                                       # how close to gate before advancing state (approach)
     dist_exit_gate_wp = 20.0                                    # how far away is the exit waypoint
     exit_thrs = dist_exit_gate_wp - .75                         # how far behind the gate is it considered passed
-    
+
 
     # Publishers
-    publisher_state_auto = rospy.Publisher("/auto/state_auto",     Int32,                queue_size=1, latch=True)
-    publisher_auto_drive = rospy.Publisher("/auto/auto_drive",     Twist,                queue_size=1, latch=True)
-    publisher_model = rospy.Publisher("/auto/pose",                Drone_Pose,          queue_size=1, latch=True)
+    publisher_state_auto = rospy.Publisher(         "/auto/state_auto",         Int32,                  queue_size=1, latch=True)
+    publisher_auto_drive = rospy.Publisher(         "/auto/auto_drive",         Twist,                  queue_size=1, latch=True)
+    publisher_model = rospy.Publisher(              "/auto/pose",               Drone_Pose,             queue_size=1, latch=True)
 
-    publisher_wp_average = rospy.Publisher("/auto/wp_average",     WP_Msg,               queue_size=1, latch=True)
-    publisher_wp_visual = rospy.Publisher("/auto/wp_visual",       WP_Msg,               queue_size=1, latch=True)
+    publisher_wp_blind = rospy.Publisher(           "/auto/wp_blind",           WP_Msg,                 queue_size=1, latch=True)
+    publisher_wp_look = rospy.Publisher(            "/auto/wp_look",            WP_Msg,                 queue_size=1, latch=True)
 
-    publisher_wp_blind = rospy.Publisher("/auto/wp_blind",         WP_Msg,               queue_size=1, latch=True)
-    publisher_wp_look = rospy.Publisher("/auto/wp_look",           WP_Msg,               queue_size=1, latch=True)
+    publisher_wp_current = rospy.Publisher(         "/auto/wp_current",         WP_Msg,                 queue_size=1, latch=True)
+    publisher_nav_log = rospy.Publisher(            "/auto/navigation_logger",  Float32MultiArray,      queue_size=1, latch=True)
+    publisher_visual_log = rospy.Publisher(         "/auto/visual_logger",      Float32MultiArray,      queue_size=1, latch=True)
 
-    publisher_wp_current = rospy.Publisher("/auto/wp_current",     WP_Msg,               queue_size=1, latch=True)
-    publisher_nav_log = rospy.Publisher("/auto/navigation_logger", Float32MultiArray,    queue_size=1, latch=True)
-    publisher_visual_log = rospy.Publisher("/auto/visual_logger",  Float32MultiArray,    queue_size=1, latch=True)
-    publisher_dev_log = rospy.Publisher("/auto/dev_logger",        String,               queue_size=1, latch=True)
-
-    publisher_gate_size = rospy.Publisher("/auto/gate_size",       Float32,              queue_size=1, latch=True)
-    publisher_gate_color = rospy.Publisher("/auto/gate_color",     Float32MultiArray,    queue_size=1, latch=True)
-	
+    publisher_gate_color = rospy.Publisher(         "/auto/gate_color",         Float32MultiArray,      queue_size=1, latch=True)
+	publisher_gate_detection = rospy.Publisher(     "/auto/gate_detection",     Detection_Active,       queue_size=1, latch=True)
 	
 	
     # abbreviations for state machine setup
@@ -773,15 +774,16 @@ if __name__ == '__main__':
     v = 'vertical' # Gate detection vertical
     h = 'horizontal' # Gate detection vertical
 
+
     # Madrid color values for gates
     gate_params1 = np.array([100, 140, 50, 140, 255, 255])
 
-    
-    start_pos = cr.WP(np.array([0.7, 5, 0]),None)
-    
+
+    # Navigation Waypoints    
+    start_wp = cr.WP(np.array(start_pos),None)
 
     turn_pos_1 = cr.WP(np.array([2.0, -1.25, 1.7]),None)
-    turn_pos_2 = cr.WP(np.array([-1.5, 14.25, 1.7]),None)
+    turn_pos_2 = cr.WP(np.array([-1.5, 11.25, 1.7]),None)
     
     gate_1 = cr.Gate(h,np.array([1.4, 10.0, 1.7]),np.pi/2)
     gate_2 = cr.Gate(v,np.array([-0.7, 0.0, 1.7]),-np.pi/2)
@@ -791,9 +793,9 @@ if __name__ == '__main__':
     # own_state, next_state, condition_type, condition_thres, exit_clear_visual, reset_gate, detection_active_type, nav_active_str, gate_color, fly, look, gate)
     
     states = [State()] * 100
-    # states[02] = State(02, 03, "bebop", cr.Bebop.TAKEOFF,  0, 0, o, None, None, None)                                  # Landed
-    # states[03] = State(03, 04, "bebop", cr.Bebop.HOVERING, 0, 0, o, None, None, None)                                  # Taking off
-    # states[04] = State(04, 10, "time",  1.0,               0, 0, o, None, None, None)                                  # Hovering
+    # states[02] = State(02, 03, "bebop", cr.Bebop.TAKEOFF,  0, 0, 0, o, None, None, None, None)                                  # Landed
+    # states[03] = State(03, 04, "bebop", cr.Bebop.HOVERING, 0, 0, 0, o, None, None, None, None)                                  # Taking off
+    # states[04] = State(04, 10, "time",  1.0,               0, 0, 0, o, None, None, None, None)                                  # Hovering
 
     states[10] = State(10, 90, "dist",  0.4,               0, 0, 0, p, None,           gate_1.look_pos,        gate_1.pos,         None)                   # testing 
 
@@ -819,13 +821,21 @@ if __name__ == '__main__':
     states[90] = State(90, 91, "bebop", cr.Bebop.LANDING,  0, 0, 0, o, None, None, None, None)      # land
     states[91] = State(91, 91, "bebop", cr.Bebop.LANDED,   0, 0, 0, o, None, None, None, None)      # landed
     
+
+
+
+
     # Subscribers
-    rospy.Subscriber("/auto/state_auto", Int32, callback_states_changed, "state_auto")
-    rospy.Subscriber("/auto/autonomy_active", Bool, callback_states_changed, "autonomy")
-    rospy.Subscriber("/bebop/odom", Odometry, callback_bebop_odometry_changed)
-    rospy.Subscriber("/auto/filtered_gate_WP", WP_Msg, callback_visual_gate_detection_changed)
+    rospy.Subscriber("/auto/state_auto",            Int32,          callback_states_changed, "state_auto")
+    rospy.Subscriber("/auto/autonomy_active",       Bool,           callback_states_changed, "autonomy")
+    rospy.Subscriber("/bebop/odom",                 Odometry,       callback_bebop_odometry_changed)
+    rospy.Subscriber("/auto/filtered_gate_WP",      WP_Msg,         callback_visual_gate_detection_changed)
+    rospy.Subscriber("/auto/emergency_shutdown",    Empty,          emergency_shutdown)
     rospy.Subscriber("/bebop/states/ardrone3/PilotingState/FlyingStateChanged", Ardrone3PilotingStateFlyingStateChanged,callback_states_changed, "state_bebop")
-    rospy.Subscriber("/auto/emergency_shutdown", Empty, emergency_shutdown)
+    
+
+
+
 
     # initializes startup by publishing state 0
     publisher_state_auto.publish(0)
@@ -844,13 +854,13 @@ if __name__ == '__main__':
     print states[10]
     states[10].enter()
 
-        
-
+    
+    
     rate = rospy.Rate(60)
     while not rospy.is_shutdown():
 		rospy.loginfo('Controller Loop')
 		update_pose_estimate()
-		#update_controller()
+		# update_controller()
 		rate.sleep()
         
 
