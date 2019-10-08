@@ -81,7 +81,7 @@ LOOP_FREQ = 60
 
 #Process Noise and Sensor noise
 PROCESS_NOISE = 0.01	# Variance of process noise
-SENSOR_NOISE = 0.01		# Variance of sensor noise
+SENSOR_NOISE = 0.1		# Variance of sensor noise
 
 def gatePoseDynamics(X,U,dt=1,noise=False):
   v = U[:3].reshape(1,3)
