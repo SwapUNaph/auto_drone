@@ -13,10 +13,10 @@ import math
 import numpy as np
 import time
 from std_msgs.msg import Int32, String, Float32MultiArray, Bool, Float32, Empty
-from bebop_msgs.msg import Ardrone3PilotingStateFlyingStateChanged
-from auto_drone.msg import Detection_Active, WP_Msg, Drone_Pose
-from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Pose, Twist, Quaternion, Point
+from nav_msgs.msg import Odometry
+from bebop_msgs.msg import Ardrone3PilotingStateFlyingStateChanged
+from auto_drone.msg import WP_Msg, Drone_Pose, Detection_Active
 from tf import transformations as tfs
 import common_resources as cr
 
@@ -421,7 +421,8 @@ class State:
         self.look = look                                        # flying and looking waypoint into gate direction
         self.time = None                                        # timer for takeoff wait
         self.gate_orientation = gate_orientation                # If it needs to guess the gate
-		self.current_gate = gate_current                        # on enter, set current_gate to the correct gate class variable
+        self.current_gate = gate_current                        # on enter, set current_gate to the correct gate class variable
+
 
     def enter(self):
         # do things when state is selected
@@ -761,8 +762,8 @@ if __name__ == '__main__':
     publisher_visual_log = rospy.Publisher(         "/auto/visual_logger",      Float32MultiArray,      queue_size=1, latch=True)
 
     publisher_gate_color = rospy.Publisher(         "/auto/gate_color",         Float32MultiArray,      queue_size=1, latch=True)
-	publisher_gate_detection = rospy.Publisher(     "/auto/gate_detection",     Detection_Active,       queue_size=1, latch=True)
-	
+    publisher_gate_detection = rospy.Publisher(     "/auto/gate_detection",     Detection_Active,       queue_size=1, latch=True)
+
 	
     # abbreviations for state machine setup
     p = "point"
