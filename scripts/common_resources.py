@@ -114,6 +114,7 @@ def qv_mult(q1, v1):
     return tfs.quaternion_multiply(tfs.quaternion_multiply(q1, q2), tfs.quaternion_conjugate(q1))[:3]
 
 
+'''
 # transform axis angle representation into quaternian
 def axang2quat(vector):
     l = np.linalg.norm(vector)
@@ -123,6 +124,7 @@ def axang2quat(vector):
     z = vector[2] / l * s
     w = math.cos(l / 2)
     return np.array([x, y, z, w])
+'''
 
 # Convert rotation vector to quaternion	
 def rvec2quat(vector):
@@ -278,7 +280,6 @@ class Gate:
 
         self.look_pos = WP(self.pos.pos - 5.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
         self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
-        self.body_vel = np.array([0,0,0])
 
 
     def reset(self):
@@ -313,10 +314,7 @@ class Gate:
             self.pos = self.org_pos - np.array([0.7,0.0,0.0])
             self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
     
-    def update_body_vel(self,vel):
-        self.body_vel[0] = vel.x
-        self.body_vel[1] = vel.y
-        self.body_vel[2] = vel.z
+    
 
 
 class Bebop_Model:
@@ -325,26 +323,29 @@ class Bebop_Model:
         self.vel = np.array([0,0,0]) # global velocity
         self.att = np.array([0,0,0]) # roll pitch yaw, FRD
         self.cmd_att = np.array([0,0,0,0]) # roll pitch yaw, FRD
-        
+        self.body_vel = np.array([0,0,0])
+
         self.max_tilt = 40*math.pi/180
         self.roll_rate = 1.5*math.pi
         self.yaw_rate = .8*math.pi
         self.climb_rate = .3
-        self.drag_term = .25
-        
+        self.drag_term = 0.0
+
+        self.accel_scale = 1.0
+        self.vel_scale = 1.2
+
         self.pose = Pose()
         
     def propagate(self,t):
-        roll_accel = limit_value(9.81*atan(self.att[0]),self.max_tilt)
-        pitch_accel = limit_value(9.81*atan(-self.att[1]),self.max_tilt)
+        roll_accel = limit_value(9.81*math.tan(self.att[0]),self.max_tilt)
+        pitch_accel = limit_value(9.81*math.tan(-self.att[1]),self.max_tilt)
         yaw = self.att[2]
 
 
-
-        accel = np.array([pitch_accel*cos(yaw)-roll_accel*sin(yaw), roll_accel*sin(yaw)+pitch_accel*sin(yaw), self.cmd_att[2]*self.climb_rate])
+        accel = self.accel_scale * np.array([pitch_accel*math.cos(yaw)-roll_accel*math.sin(yaw), roll_accel*math.sin(yaw)+pitch_accel*math.sin(yaw), self.cmd_att[2]*self.climb_rate])
         accel = accel - self.drag_term * .5 * np.array([self.vel[0]**2, self.vel[1]**2, 0])
         self.vel = self.vel + accel * t
-        self.pos = self.pos + self.vel*t
+        self.pos = self.pos + self.vel_scale * self.vel*t
         
         self.pose.position.x = self.pos[0]
         self.pose.position.y = self.pos[1]
@@ -387,9 +388,9 @@ class Bebop_Model:
         hdg = -self.att[2]
 
         vel_twist = odom.twist.twist.linear
-
-        self.vel = np.array([vel_twist.x * cos(hdg) - vel_twist.y * sin(hdg),
-                             vel_twist.y * cos(hdg) + vel_twist.x * sin(hdg), 
+        
+        self.vel = np.array([vel_twist.x * math.cos(hdg) - vel_twist.y * math.sin(hdg),
+                             vel_twist.y * math.cos(hdg) + vel_twist.x * math.sin(hdg), 
                              vel_twist.z])
         
         self.pose = odom.pose.pose            
@@ -408,15 +409,21 @@ class Bebop_Model:
 
     def get_drone_pose(self):
         drone_pose = Drone_Pose()
-        drone_pose.pose = self.pose
+        drone_pose.pos = self.pose
         drone_twist = Twist()
         drone_twist.linear.x = self.vel[0]
         drone_twist.linear.y = self.vel[1]
         drone_twist.linear.z = self.vel[2]
         drone_pose.vel = drone_twist
 
+
+
         return drone_pose
 
+    def update_body_vel(self,vel):
+        self.body_vel[0] = vel.x
+        self.body_vel[1] = vel.y
+        self.body_vel[2] = vel.z
 
 
 # PID control loop without smoothing

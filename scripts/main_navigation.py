@@ -541,8 +541,10 @@ def callback_bebop_odometry_changed(data):
 
     global bebop_model
     global nav_active
+    global publisher_model
     global bebop_odometry
     global bebop_last_odom_time
+
 
 
 
@@ -581,7 +583,7 @@ def callback_bebop_odometry_changed(data):
 
 
     # Send out bebops estimated position
-    publisher_pose.publish(bebop_model.pose)
+    publisher_model.publish(bebop_model.get_drone_pose())
 
     bebop_odometry = data
     bebop_last_odom_time = time.time()
@@ -603,34 +605,52 @@ def update_last_known_bebop(odom):
 
 def bebop2track_transform_odom(bebop_odom):
     pose = bebop_odom.pose.pose
-    twist = bebop_odom.twist.twist
-
+    twist = bebop_odom.twist.twist.linear
 
     bebop_d_pos = np.array([pose.position.x, pose.position.y, pose.position.z]) - bebop_last_known_pos
     bebop_q = np.array([pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w])
 
-    track_bebop_dpos = track_last_known_pos - bebop_last_known_pos
-    track_bebop_dhdg = track_last_known_hdg - bebop_last_known_hdg
+
+    hdg_bebop = tfs.euler_from_quaternion(bebop_q)[2]
+    track_bebop_dhdg =  track_last_known_hdg - bebop_last_known_hdg
     
+    print track_last_known_hdg
+    print bebop_last_known_hdg
+    print 
+
     R_hdg = tfs.rotation_matrix(track_bebop_dhdg,(0,0,1))[0:3,0:3]
 
+    track_pos = np.matmul(R_hdg,bebop_d_pos) + track_last_known_pos
+
+    bebop_vel_body = np.array([twist.x,twist.y,twist.z])
 
 
-    track_pos = (np.matmul(bebop_d_pos,R_hdg)) + track_last_known_pos
-        
+    print track_bebop_dhdg
+    print R_hdg
+    print bebop_vel_body
+
+    R_body2track = tfs.rotation_matrix(hdg_bebop+track_bebop_dhdg,(0,0,1))[0:3,0:3]
+
+    track_vel_body = np.matmul(R_body2track,bebop_vel_body)
+    print track_vel_body
+
     track_odom = bebop_odom
-    
+
+    track_odom.twist.twist.linear.x = track_vel_body[0]
+    track_odom.twist.twist.linear.y = track_vel_body[1]
+    track_odom.twist.twist.linear.z = track_vel_body[2]
+        
     track_odom.pose.pose.position.x = track_pos[0]
     track_odom.pose.pose.position.y = track_pos[1]
     track_odom.pose.pose.position.z = track_pos[2]
 
-    bebop_hdg_LK = tfs.quaternion_multiply(bebop_q,cr.axang2quat([0,0,track_bebop_dhdg]))
-    track_hdg = tfs.quaternion_multiply(bebop_hdg_LK,cr.axang2quat([0,0,track_last_known_hdg]))
+    track_hdg = tfs.quaternion_multiply(bebop_q,tfs.quaternion_from_euler(0,0,track_bebop_dhdg))
 
     track_odom.pose.pose.orientation.x = track_hdg[0]
     track_odom.pose.pose.orientation.y = track_hdg[1]
     track_odom.pose.pose.orientation.z = track_hdg[2]
     track_odom.pose.pose.orientation.w = track_hdg[3]
+    
     return track_odom
 
 
@@ -643,7 +663,7 @@ def update_pose_estimate():
     
     # if nav_active == 'point' or  nav_active == 'off':
     #     if bebop_last_known_pos is not None:
-    bebop_model.propagate(.05)
+    bebop_model.propagate(1.0/loop_rate)
 	
     publisher_model.publish(bebop_model.get_drone_pose())
     
@@ -694,8 +714,12 @@ if __name__ == '__main__':
     # Variables
     autonomy_active = False                                     # autonomous mode is active
     
-    start_pos = np.array([-.7, 5, 0])
-    start_hdg = -np.pi/2
+    # start_pos = np.array([-.7, 5, 0])
+    # start_hdg = -np.pi/2
+    
+    start_pos = np.array([0.0, 0.0, 0.0])
+    start_hdg = 0.0
+
     bebop_model = cr.Bebop_Model(start_pos,start_hdg)           # Initialize odometry message to store position
 
     bebop_odometry = None                                       # latest odometry from bebop
@@ -708,6 +732,7 @@ if __name__ == '__main__':
     current_state = None                                        # the actual state object with method "check"
     state_bebop = None                                          # state of drone itself (own state machine)
     
+    loop_rate = 20
 
     current_gate = None
     
@@ -843,9 +868,14 @@ if __name__ == '__main__':
 
     
     
-    rospy.loginfo("Waiting for autonomy")    
-    while not autonomy_active:
-        time.sleep(.25)
+    # rospy.loginfo("Waiting for autonomy")    
+    # while not autonomy_active:
+    #     time.sleep(.25)
+
+    while bebop_odometry is None:
+        time.sleep(.5)
+
+
 
     update_last_known_bebop(bebop_odometry)
 
@@ -857,7 +887,7 @@ if __name__ == '__main__':
 
     
     
-    rate = rospy.Rate(60)
+    rate = rospy.Rate(loop_rate)
     while not rospy.is_shutdown():
 		rospy.loginfo('Controller Loop')
 		update_pose_estimate()
