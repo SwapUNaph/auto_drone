@@ -313,7 +313,7 @@ class Gate:
             self.pos = self.org_pos - np.array([0.7,0.0,0.0])
             self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
     
-    def update_body_vel(self,vel)
+    def update_body_vel(self,vel):
         self.body_vel[0] = vel.x
         self.body_vel[1] = vel.y
         self.body_vel[2] = vel.z

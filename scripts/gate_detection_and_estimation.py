@@ -14,10 +14,11 @@ import rospy
 import signal
 import sys
 import math
-from std_msgs.msg import String
+from std_msgs.msg import String, Empty
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist, Pose
 from auto_drone.msg import Drone_Pose, WP_Msg, Detection_Active
+from bebop_msgs.msg import CommonCommonStateBatteryStateChanged
 from nav_msgs.msg import Odometry
 import numpy as np
 import cv2
@@ -34,7 +35,7 @@ NOT_GATE_SIZE = 0.8
 
 
 # HSV thresholds for LED gate
-hsv_thresh_low = (0, 0, 230)
+hsv_thresh_low = (0, 0, 200)
 hsv_thresh_high = (180, 255, 255)
 
 # HSV thresholds for non-LED gate
@@ -43,7 +44,7 @@ not_gate_hsv_thresh_high = (180, 255, 100)
 
 # Gate thresholds
 AREA_THRESH = 1000
-ASPECT_RATIO_THRESH_LOW = 0.8 # Should be between 0.0 and 1.0
+ASPECT_RATIO_THRESH_LOW = 0.5 # Should be between 0.0 and 1.0
 ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
 SOLIDITY_THRESH = 0.90
 ROI_MEAN_THRESH = 100
@@ -73,8 +74,8 @@ drone_angular_vel = np.zeros(3)
 
 ##########################  Filters   ##################################
 # MVA filters
-orientationFilter = MVA(5)
-translationFilter = MVA(5)
+orientationFilter = MVA(20)
+translationFilter = MVA(20)
 
 # Loop Frequency (important for kalman filtering)
 LOOP_FREQ = 60
@@ -116,8 +117,10 @@ C = np.eye(6, dtype='float')
 Q = np.zeros((6, 6), float)
 np.fill_diagonal(Q, PROCESS_NOISE)
 
+
 R = np.zeros((C.shape[0], C.shape[0]), float)
 np.fill_diagonal(R, SENSOR_NOISE)
+R[5,5] = 0.05
 
 # Initial Estimate
 X0 = np.zeros((6,1))
@@ -192,18 +195,22 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     #contour_img = img.copy()
     #cv2.drawContours(contour_img, contours, -1, (0, 255, 0), 1)
     #cv2.imshow('contour_img', contour_img)
-
+    
+    # Filter contour by area: area > 5 % of image area
+    contours = list(filter(lambda x: (cv2.contourArea(x) > AREA_THRESH) , contours))
+    #print("Contours after area filter: %d" % len(quadrlFiltered))
+    
     # Approximate quadrilaterals
-    quadrl=[]
+    quadrlFiltered=[]
     for cnt in contours:
         approx = cv2.approxPolyDP(cnt,0.05*cv2.arcLength(cnt,True),True)
         if len(approx) == 4:
-            quadrl.append(approx)
+            quadrlFiltered.append(approx)
             
     #print("Contours before all filters: %d" % len(quadrl))
             
     # Filter contour by area: area > 5 % of image area
-    quadrlFiltered = list(filter(lambda x: (cv2.contourArea(x) > AREA_THRESH) , quadrl))
+    #quadrlFiltered = list(filter(lambda x: (cv2.contourArea(x) > AREA_THRESH) , quadrlFiltered))
     #print("Contours after area filter: %d" % len(quadrlFiltered))
 
     # Filter contour by solidity > 0.9
@@ -316,6 +323,10 @@ def drone_odometry_callback(corrected_drone_odom):
     drone_orientation = quat2euler(drone_orientation)
     drone_linear_vel, drone_angular_vel = twist2array(corrected_drone_odom.twist.twist)
 
+def battery_callback(battery_msg):
+    if battery_msg.percent < 20:
+        land_publisher.publish(Empty())
+        rospy.logerr("Drone Battery < 20 %.")
 
 
 
@@ -336,18 +347,23 @@ if __name__ == '__main__':
     # Drone odometry subscription
     #rospy.Subscriber('/auto/pose', Drone_Pose, drone_odometry_callback)
     rospy.Subscriber('/bebop/odom', Odometry, drone_odometry_callback)
+    rospy.Subscriber('/bebop/states/common/CommonState/BatteryStateChanged', CommonCommonStateBatteryStateChanged, battery_callback)
 
 
     # Publishers
     image_publisher = rospy.Publisher('/auto/gate_detection_image', Image, queue_size=2)
     gate_pose_pub = rospy.Publisher('/auto/raw_gate_WP', WP_Msg, queue_size=5)
     filtered_gate_pose_pub = rospy.Publisher('/auto/filtered_gate_WP', WP_Msg, queue_size=5)
+    land_publisher = rospy.Publisher('/bebop/land', Empty, queue_size=1)
     
 
     # Update rate for the control loop
     rate = rospy.Rate(LOOP_FREQ) # LOOP_FREQ hz
 
+    start = time()
+    
     while not rospy.is_shutdown():
+        start = time()
         ret, img = cap.read()
         if img is None:
             rospy.logerr("No Camera detected!!!")
@@ -355,34 +371,41 @@ if __name__ == '__main__':
             img = img[:,:int(FRAME_WIDTH/2)]
             
             # Gate detection
+            
             gate = detect_gate(img, hsv_thresh_low, hsv_thresh_high)
             
             # If gate detected succesfully
             if gate is not None and np.array_equal(gate.shape, [4,2]):
                 cv2.drawContours(img, [gate.reshape(4,2)], 0, (255, 0, 0), 2)
                 annotateCorners(gate, img)  
-                euler, tvec = getGatePose(gate, GATE_SIZE)
-                euler = orientationFilter.update(euler)
-                tvec = translationFilter.update(tvec)
-                gate_WP = array2WP(tvec, euler[2], "")
-                EKF.C = np.eye(6) # Use measurements to fuse with predictions
+                raw_euler, raw_tvec = getGatePose(gate, GATE_SIZE)
+                EKF.C = np.eye(6, dtype='float') # Use measurements to fuse with predictions
             else:
-				euler = np.zeros(3)
-				tvec = np.zeros(3)
-				gate_WP = WP_Msg()
+				raw_euler = np.zeros(3)
+				raw_tvec = np.zeros(3)
 				EKF.C = np.zeros((6,6), float) # No measurements, rely only on prediction
                 
 			# Kalman Filtering
-            Y = np.append(tvec, euler).reshape((6,1))
+            #euler = orientationFilter.update(raw_euler)
+            #tvec = translationFilter.update(raw_tvec)
+            
+            Y = np.append(raw_tvec, raw_euler).reshape((6,1))
             U = np.append(drone_linear_vel, drone_angular_vel).reshape((6,1))
+            EKF.dt = (time() - start)
             EKF.filter(U,Y)
             X = EKF.X.copy()
-            filtered_gate_WP = array2WP(X[:3], X[5], "")
-            
-            logMeasuredGatePose(X)
+            tvec = X[:3]
+            euler = X[3:]
+
+            #logMeasuredGatePose(X)
+            filtered_gate_WP = array2WP(tvec, euler[2], "")
+            gate_WP = array2WP(raw_tvec, raw_euler[2], "")
             gate_pose_pub.publish(gate_WP)
-            filtered_gate_pose_pub.publish(filtered_gate_WP)    
-            image_publisher.publish(bridge.cv2_to_imgmsg(img,"bgr8"))
+            filtered_gate_pose_pub.publish(filtered_gate_WP) 
+            
+            rospy.loginfo("LOOP Time: {} s".format(time() - start))
+            #img = cv2.resize(img, None, fx=0.1, fy=0.1)   
+            #image_publisher.publish(bridge.cv2_to_imgmsg(img,"bgr8"))
          
-        rate.sleep()
+        #rate.sleep()
             
