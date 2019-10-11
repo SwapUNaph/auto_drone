@@ -415,10 +415,16 @@ class Bebop_Model:
 	def update_pose_gate(self,data,gate):
 		meas_vec = np.array([data.pos.x, data.pos.y, data.pos.z])
 		meas_hdg = data.hdg
+
 		gate_hdg = gate.hdg
 		gate_pos = gate.pos
 
+
 		R_gate = tfs.rotation_matrix(meas_hdg,(0,0,1))[0:2][0:2]
+		print R_gate
+		print -meas_vec
+		print gate_pos
+
 		pos_new = gate_pos + np.matmul(R_gate,-meas_vec)
 
 		theta_new = gate_hdg - meas_hdg
