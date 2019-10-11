@@ -1,0 +1,17 @@
+Test 1:
+-> Parameters:
+    SENSOR_NOISE: 0.1
+    PROCESS_NOISE: 0.01
+-> Data points: 50
+-> Battery died after first 30 s or so. Couldn't get much data.
+
+    
+Test 2:
+-> Parameters:
+    SENSOR_NOISE: 0.1
+    PROCESS_NOISE: 0.01
+-> Data points: 250
+-> Went up-down, front-back, up-down, left-right, front-back.
+-> Did not get negative x when gone fully inside the gate. Need to check 
+    the prediction fuction for that.
+
