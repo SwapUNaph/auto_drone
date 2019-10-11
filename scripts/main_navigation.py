@@ -221,6 +221,9 @@ def navigate_point():
 
     hdg = bebop_model.att[2]
     
+    print current_state
+    print current_state.fly
+    print current_state.look
 
     target = current_state.fly.pos
     target_look = current_state.look.pos
@@ -302,7 +305,7 @@ def navigate_point():
     r_error = cr.wrap2pi(-(hdg - pos_theta))
     
 
-    nav_cmd_r = nav_PID_r.update(z_error)
+    nav_cmd_r = nav_PID_r.update(r_error)
     
 
 
@@ -315,9 +318,8 @@ def navigate_point():
     msg.angular.z = cr.limit_value(sum(nav_cmd_r), nav_limit_r)
 
 
-
     log_array = Float32MultiArray()
-
+    
     log_array.data = [x_pos_error,
         x_pos_proj,
         x_vel_des_proj,
@@ -455,6 +457,7 @@ class State:
             current_gate = self.current_gate
 
 
+        print '\n\n\n\n\n\nshould be printing now\n\n\n\n\n\n'
         # publish blind WP for ground control station
         if self.look is not None:
             msg = WP_Msg()    
@@ -462,21 +465,24 @@ class State:
             msg.pos.y = self.look.pos[1]
             msg.pos.z = self.look.pos[2]
             msg.hdg = 0
+            global publisher_wp_look 
             publisher_wp_look.publish(msg)
 
         
         # publish look WP for ground control station
         if self.fly is not None:
             msg = WP_Msg()
-            
-            if self.nav_active == 'through':
-                msg.pos.x = self.fly.pos[0]
-                msg.pos.y = self.fly.pos[1]
-                msg.pos.z = self.fly.pos[2]
-                if self.fly.hdg is not None:
-                    msg.hdg = self.fly.hdg
-                publisher_wp_blind.publish(msg)
+            msg.pos.x = self.fly.pos[0]
+            msg.pos.y = self.fly.pos[1]
+            msg.pos.z = self.fly.pos[2]
+            if self.fly.hdg is not None:
+                msg.hdg = self.fly.hdg
 
+            global publisher_wp_fly 
+            publisher_wp_fly.publish(msg)
+
+
+        print '\n\n\n\n\n\ndone publishing now\n\n\n\n\n\n'
 
 
         
@@ -616,7 +622,7 @@ def callback_bebop_odometry_changed(data):
     if bebop_odometry is None:
         rospy.loginfo("No position")
         rospy.loginfo("publish empty driving msg")
-        publisher_auto_drive.publish(Twist())
+        send_bebop_cmd(Twist())
         
         bebop_last_odom_time = time.time()
         bebop_odometry = data
@@ -624,7 +630,7 @@ def callback_bebop_odometry_changed(data):
 
     if current_state is None:
         rospy.loginfo("No State")
-        publisher_auto_drive.publish(Twist())
+        send_bebop_cmd(Twist())
 
         bebop_last_odom_time = time.time()
         bebop_odometry = data
@@ -677,7 +683,7 @@ def callback_bebop_odometry_changed(data):
             # Should be taken care of from gate detection callback
             temp_pos = data.pose.pose.position
             quat = data.pose.pose.orientation
-            track_last_known_pos = bebop_model.pos
+            track_last_known_pos = np.array([bebop_model.pos[0:1],0])
             track_last_known_hdg = bebop_model.hdg
             bebop_last_known_pos = np.array([temp_pos.x,temp_pos.y,temp_pos.z])
             bebop_last_known_hdg = tfs.euler_from_quaternion([quat.x,quat.y,quat.z,quat.w])[2]
@@ -738,7 +744,7 @@ def bebop2track_transform_odom(bebop_odom):
     track_odom.pose.pose.position.y = track_pos[1]
     track_odom.pose.pose.position.z = track_pos[2]
 
-    track_quat = tfs.quaternion_multiply(tfs.quaternion_from_euler(0,0,hdg_bebop+track_bebop_dhdg),bebop_q)
+    track_quat = tfs.quaternion_multiply(tfs.quaternion_from_euler(0,0,track_bebop_dhdg),bebop_q)
 
     track_odom.pose.pose.orientation.x = track_quat[0]
     track_odom.pose.pose.orientation.y = track_quat[1]
@@ -764,7 +770,7 @@ def update_pose_estimate():
     temp_odom.pose.pose = temp_pose
 
     publisher_model.publish(temp_pose)
-    publisher_model_odom.publish(temp_odom)
+    # publisher_model_odom.publish(temp_odom)
     
 	# calculate distance from WP
     navigation_distance = calculate_distance()
@@ -776,30 +782,38 @@ def update_pose_estimate():
 
 
 
+def send_bebop_cmd(twist):
+    global autonomy_active
+
+    if autonomy_active:
+        publisher_auto_drive.publish(twist)
+
+
+
 def update_controller():
     
     if nav_active == "off":
         # navigation off, send empty message and return
         rospy.loginfo("Navigation turned off")
         #rospy.loginfo("publish empty driving msg")
-        publisher_auto_drive.publish(Twist())
+        send_bebop_cmd(Twist())
         return
 
     elif nav_active == "point":
         if bebop_last_known_pos is not None:
             auto_driving_msg = navigate_point()
-            publisher_auto_drive.publish(auto_driving_msg)
+            send_bebop_cmd(auto_driving_msg)
     
     elif nav_active == "through":
         auto_driving_msg = navigate_through()
-        publisher_auto_drive.publish(auto_driving_msg)
+        send_bebop_cmd(auto_driving_msg)
         
 
 
 def emergency_shutdown(_):
     # if this is triggered, it shuts off node for performance reasons
     rospy.loginfo("emergency shutdown")
-    rospy.signal_shutdown("emergency shutdown")
+    # rospy.signal_shutdown("emergency shutdown")
 
 
 
@@ -813,10 +827,12 @@ if __name__ == '__main__':
     # Variables
     autonomy_active = False                                     # autonomous mode is active
     
-    start_pos = np.array([-.7, 5, 0])
+    start_pos = np.array([-.7, 8, 0])
     start_hdg = -np.pi/2
     # start_pos = np.array([0.0, 0.0, 0.0])
     # start_hdg = 0.0
+
+    
 
     bebop_model = cr.Bebop_Model(start_pos,start_hdg)           # Initialize odometry message to store position
 
@@ -846,18 +862,18 @@ if __name__ == '__main__':
  
     # PID Controller Classes
     nav_PID_z = cr.PID(1.0, 0, 0.0)
-    nav_PID_r = cr.PID(0.5, 0, 1.0)
+    nav_PID_r = cr.PID(1.0, 0, 1.0)
         
 
 
     # Controller Params
     thr_nav_limit_lat = .1                                      # absolute limit to all cmd before being sent, thr_nav
     
-    point_time_proj = 0.7                                       # acceleration response time 
+    point_time_proj = .5                                     # acceleration response time 
     point_nav_des_vel = 1.5                                     # max calculated velocity
-    point_vel_slope = 2.0                                       # Desired vel slope
+    point_vel_slope = 2.0                                      # Desired vel slope
     point_lateral_gain = 1.0                                    # Lateral command gain
-    point_nav_limit_lat = .3                                    # lateral command limit
+    point_nav_limit_lat = .2                                    # lateral command limit
     
 
 
@@ -875,12 +891,12 @@ if __name__ == '__main__':
 
     # Publishers
     publisher_state_auto = rospy.Publisher(         "/auto/state_auto",         Int32,                  queue_size=1, latch=True)
-    publisher_auto_drive = rospy.Publisher(         "/auto/auto_drive",         Twist,                  queue_size=1, latch=True)
-    publisher_model = rospy.Publisher(              "/auto/pose",               Drone_Pose,             queue_size=1, latch=True)
-    publisher_model_odom = rospy.Publisher(         "/auto/pose_odom",          Odometry,               queue_size=1, latch=True)
+    publisher_auto_drive = rospy.Publisher(         "/bebop/cmd_vel",           Twist,                  queue_size=1, latch=True)
+    publisher_model = rospy.Publisher(              "/auto/pose",               Drone_Pose,             queue_size=1)
+    publisher_model_odom = rospy.Publisher(         "/auto/pose_odom",          Odometry,               queue_size=1)
 
-    publisher_wp_blind = rospy.Publisher(           "/auto/wp_blind",           WP_Msg,                 queue_size=1, latch=True)
-    publisher_wp_look = rospy.Publisher(            "/auto/wp_look",            WP_Msg,                 queue_size=1, latch=True)
+    publisher_wp_fly = rospy.Publisher(             "/auto/wp_fly",             WP_Msg,                 queue_size=1)
+    publisher_wp_look = rospy.Publisher(            "/auto/wp_look",            WP_Msg,                 queue_size=1)
 
     publisher_wp_current = rospy.Publisher(         "/auto/wp_current",         WP_Msg,                 queue_size=1, latch=True)
     publisher_nav_log = rospy.Publisher(            "/auto/navigation_logger",  Float32MultiArray,      queue_size=1, latch=True)
@@ -911,10 +927,11 @@ if __name__ == '__main__':
     turn_pos_1 = cr.WP(np.array([2.0, -1.25, 1.7]),None)
     turn_pos_2 = cr.WP(np.array([-1.5, 11.25, 1.7]),None)
     
-    gate_1 = cr.Gate(h,np.array([1.4, 10.0, 1.7]),np.pi/2)
-    gate_2 = cr.Gate(v,np.array([-0.7, 0.0, 1.7]),-np.pi/2)
+    gate_1 = cr.Gate(v,np.array([-0.7, 0.0, 1.7]),-np.pi/2)
+    gate_2 = cr.Gate(h,np.array([1.4, 10.0, 1.7]),np.pi/2)
+    
 
-
+    init_state = 8
 
     # own_state, next_state, condition_type, condition_thres, exit_clear_visual, reset_gate, detection_active_type, nav_active_str, gate_color, fly, look, gate)
     
@@ -923,13 +940,24 @@ if __name__ == '__main__':
     # states[03] = State(03, 04, "bebop", cr.Bebop.HOVERING, 0, 0, 0, o, None, None, None, None)                                  # Taking off
     # states[04] = State(04, 10, "time",  1.0,               0, 0, 0, o, None, None, None, None)                                  # Hovering
 
-    states[10] = State(10, 90, "dist",  0.4,               0, 0, 0, p, None,           gate_1.look_pos,        gate_1.pos,         None)                   # testing 
 
 
-    states[11] = State(11, 12, "wp",    None,              0, 0, v, p, gate_params1,   gate_1.look_pos,        gate_1.pos,         gate_1)                 # Move and Look for gate
-    states[12] = State(12, 13, "dist",  dist_gate_close,   1, 0, v, t, gate_params1,   gate_1.pos,             gate_1.pos,         gate_1)                 # move through gate until cant see it
-    states[13] = State(13, 14, "dist",  exit_thrs,         0, 1, 0, p, None,           gate_1.exit_pos,        turn_pos_1,         None)                   # Move through gate
-    states[14] = State(14, 90, "dist",  dist_gate_blind,   0, 0, 0, p, None,           turn_pos_1,             gate_2.pos,         None)                   # Turn around manuever
+
+    start_pos_wp = cr.WP(start_pos+[0,-.5,1.7],None)
+    loop_temp_wp = cr.WP(start_pos+[0,10,1.7],None)
+    loop_2_wp = cr.WP([0,6.5,1.7],None)
+
+
+    states[8]  = State( 8, 90, "time",  1000.0,            0, 0, 0, t, gate_params1,   gate_1.look_pos,        gate_1.pos,        None)                   # testing 
+
+    states[10] = State(10, 11, "dist",  0.3,               0, 0, 0, p, None,           gate_1.look_pos,        loop_2_wp,         None)                   # testing 
+    states[11] = State(11, 10, "dist",  0.3,               0, 0, 0, p, None,           start_pos_wp,           loop_2_wp,         None)                   # testing 
+
+
+    states[14] = State(14, 15, "wp",    None,              0, 0, v, p, gate_params1,   gate_1.look_pos,        gate_1.pos,         gate_1)                 # Move and Look for gate
+    states[15] = State(15, 16, "dist",  dist_gate_close,   1, 0, v, t, gate_params1,   gate_1.pos,             gate_1.pos,         gate_1)                 # move through gate until cant see it
+    states[16] = State(16, 17, "dist",  exit_thrs,         0, 1, 0, p, None,           gate_1.exit_pos,        turn_pos_1,         None)                   # Move through gate
+    states[17] = State(17, 90, "dist",  dist_gate_blind,   0, 0, 0, p, None,           turn_pos_1,             gate_2.pos,         None)                   # Turn around manuever
 
 
     '''
@@ -967,23 +995,25 @@ if __name__ == '__main__':
     publisher_state_auto.publish(0)
 
     
-    
-    # rospy.loginfo("Waiting for autonomy")    
-    # while not autonomy_active:
-    #     time.sleep(.25)
-
     while bebop_odometry is None:
         time.sleep(.5)
-
-
-
+    
     update_last_known_bebop(bebop_odometry)
 
+    # rospy.loginfo("Waiting for autonomy")
+    # while not autonomy_active:
+    #     time.sleep(.25)
+    
+
+    
+
+    
+
     rospy.loginfo("Autonomy active, starting states")
-    # enter state 10 in state machine
-    publisher_state_auto.publish(10)
-    print states[10]
-    states[10].enter()
+    # enter state init_state in state machine
+    publisher_state_auto.publish(init_state)
+    print states[init_state]
+    states[init_state].enter()
 
     
     
@@ -991,7 +1021,7 @@ if __name__ == '__main__':
     while not rospy.is_shutdown():
 		rospy.loginfo('Controller Loop')
 		update_pose_estimate()
-		update_controller()
+		# update_controller()
 		rate.sleep()
         
 

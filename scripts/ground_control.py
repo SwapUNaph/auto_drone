@@ -94,9 +94,9 @@ if __name__ == '__main__':
     rospy.Subscriber("/auto/state_auto", Int32, callback_state_auto_changed)
 
     # publishers
-    cmd_vel_pub = rospy.Publisher('/bebop/cmd_vel', Twist, queue_size=1, latch=True)
+    cmd_vel_pub = rospy.Publisher('/bebop/cmd_vel', Twist, queue_size=1)
     state_auto_pub = rospy.Publisher('/auto/state_auto', Int32, queue_size=1, latch=True)
-    publisher_emergency_shutdown = rospy.Publisher("/auto/emergency_shutdown", Empty, queue_size=1, latch=True)
+    publisher_emergency_shutdown = rospy.Publisher("/auto/emergency_shutdown", Empty, queue_size=1)
 
     # allow starting gcs without joystick for debugging purposes
     start_without_joystick = False

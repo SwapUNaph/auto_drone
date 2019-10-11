@@ -95,7 +95,7 @@ class bebop_data:
             self.tbr.sendTransform((0.7, 10.0, 1.7),(quat2[0],quat2[1],quat2[2],quat2[3]),rospy.Time.now(),'gate_frame21', "track_frame")
             self.tbr.sendTransform((2.1, 10.0, 1.7),(quat2[0],quat2[1],quat2[2],quat2[3]),rospy.Time.now(),'gate_frame22', "track_frame")
             self.arena_pub.publish(marker_array)
-            print 'published arena'
+            # print 'published arena'
             arena_rate.sleep()
 
 
@@ -551,19 +551,18 @@ class bebop_data:
 
         elif args == 'wp_fly':
 
-            if data.pos.z == 0 and data.hdg == 0:
-                return
+            # if data.pos.x == 0 and data.pos.z == 0:
+            #     return
             
-            marker_array = MarkerArray()
 
-            
             quat = tf.transformations.quaternion_from_euler(0, 0, data.hdg)
             
+            marker_array = MarkerArray()
             gate_marker_1 = Marker()
             gate_marker_1.header.frame_id = "wp_fly_frame"
             gate_marker_1.header.stamp    = rospy.get_rostime()
             gate_marker_1.ns = 'wp_fly'
-            gate_marker_1.id = self.gate_number
+            gate_marker_1.id = 1
             gate_marker_1.type = 2
             gate_marker_1.action = 0
             gate_marker_1.pose.orientation.w = 1
@@ -578,22 +577,23 @@ class bebop_data:
             marker_array.markers.append(gate_marker_1)
 
             self.fly_pub.publish(marker_array)
-            
             self.tbr.sendTransform((data.pos.x,data.pos.y,data.pos.z),(quat[0],quat[1],quat[2],quat[3]),rospy.get_rostime(),'wp_fly_frame',"track_frame")
-
 
         elif args == 'wp_look':
 
-            if data.pos.x == 0 and data.pos.y == 0:
-                return
             
+
+            # if data.pos.x == 0 and data.pos.y == 0:
+            #     return
+            
+
             marker_array = MarkerArray()
             
             gate_marker_1 = Marker()
             gate_marker_1.header.frame_id = 'wp_look_frame'
             gate_marker_1.header.stamp    = rospy.get_rostime()
             gate_marker_1.ns = "wp_look"
-            gate_marker_1.id = self.gate_number
+            gate_marker_1.id = 1
             gate_marker_1.id = 1
             gate_marker_1.type = 2
             gate_marker_1.action = 0
@@ -608,9 +608,8 @@ class bebop_data:
             gate_marker_1.lifetime = rospy.Duration(0)
             marker_array.markers.append(gate_marker_1)
             
-            self.gate_pub.publish(marker_array)            
+            self.look_pub.publish(marker_array)            
             self.tbr.sendTransform((data.pos.x,data.pos.y,2),(0,0,0,1),rospy.get_rostime(),'wp_look_frame',"track_frame")
-            
         
 
 def main():
