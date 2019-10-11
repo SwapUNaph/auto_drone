@@ -339,7 +339,7 @@ class Bebop_Model:
 		self.drag_term = 0.0
 
 		self.accel_scale = 1.0
-		self.vel_scale = 1.2
+		self.vel_scale = 0.5
 
 		self.pose = Pose()
 		
@@ -348,7 +348,6 @@ class Bebop_Model:
 		pitch_accel = limit_value(9.81*math.tan(-self.att[1]),self.max_tilt)
 		yaw = self.att[2]
 
-
 		accel = self.accel_scale * np.array([pitch_accel*math.cos(yaw)-roll_accel*math.sin(yaw), roll_accel*math.sin(yaw)+pitch_accel*math.sin(yaw), self.cmd_att[2]*self.climb_rate])
 		accel = accel - self.drag_term * .5 * np.array([self.vel[0]**2, self.vel[1]**2, 0])
 		self.vel = self.vel + accel * t
@@ -356,24 +355,24 @@ class Bebop_Model:
 		
 		
 		
-		roll_err = self.cmd_att[0] - self.att[0]
-		pitch_err = self.cmd_att[1] - self.att[1]
+		# roll_err = self.cmd_att[0] - self.att[0]
+		# pitch_err = self.cmd_att[1] - self.att[1]
 
-		if abs(roll_err) > self.roll_rate * t:
-			d_roll = np.sign(roll_err) * self.roll_rate * t
-		else:
-			d_roll = roll_err
+		# if abs(roll_err) > self.roll_rate * t:
+		# 	d_roll = np.sign(roll_err) * self.roll_rate * t
+		# else:
+		# 	d_roll = roll_err
 
-		if abs(pitch_err) > self.roll_rate * t:
-			d_pitch = np.sign(pitch_err) * self.roll_rate * t
-		else:
-			d_pitch = pitch_err
+		# if abs(pitch_err) > self.roll_rate * t:
+		# 	d_pitch = np.sign(pitch_err) * self.roll_rate * t
+		# else:
+		# 	d_pitch = pitch_err
+		
+		# d_yaw = self.cmd_att[3] * self.yaw_rate * t
+		
 
-		d_yaw = self.cmd_att[3] * self.yaw_rate * t
-
-
-		self.att = self.att + np.array([d_roll, d_pitch, d_yaw])
-
+		# self.att = self.att + np.array([d_roll, d_pitch, d_yaw])
+		
 		self.update_pose()
 
 
@@ -389,25 +388,20 @@ class Bebop_Model:
 		self.pose.orientation.z = quat[2]
 		self.pose.orientation.w = quat[3]
 
+
 	# updates based solely on new odometry
 	def update_odom(self,odom):
-		self.pos = np.array([odom.pose.pose.position.x,
-							 odom.pose.pose.position.y,
-							 odom.pose.pose.position.z])
+		pos_t = odom.pose.pose.position
+		self.pos = np.array([pos_t.x, pos_t.y, pos_t.z])
 
 		quat = odom.pose.pose.orientation
-		
 		self.att = np.array(tfs.euler_from_quaternion([quat.x, quat.y, quat.z, quat.w]))
 		
-		hdg = -self.att[2]
-
 		vel_twist = odom.twist.twist.linear
+		self.vel = np.array([vel_twist.x, vel_twist.y, vel_twist.z])
 		
-		self.vel = np.array([vel_twist.x * math.cos(hdg) - vel_twist.y * math.sin(hdg),
-							 vel_twist.y * math.cos(hdg) + vel_twist.x * math.sin(hdg), 
-							 vel_twist.z])
-		
-		self.pose = odom.pose.pose            
+		self.pose = odom.pose.pose
+
 
 	# updates commanded attitude from commands
 	def update_att(self,commands):

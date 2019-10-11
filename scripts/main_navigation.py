@@ -26,10 +26,7 @@ def signal_handler(_, __):
     sys.exit(0)
 
 
-
-
-
-# needs overhaul
+# needs fixes
 def navigate_through():
     # navigation algorithm to carry us onto the centerline and up to the gate
     
@@ -210,7 +207,6 @@ def navigate_through():
     log_array.layout.dim[0].label = 'point_logs'
     log_array.layout.dim[0].size = len(log_array.data)
 
-    self.nav_log_pub.publish(log_array)
 
 
     publisher_nav_log.publish(log_array)
@@ -410,7 +406,7 @@ class State:
         self.condition_type = condition_type                    # type of state advancement
         self.condition_thres = condition_thres                  # value for state advancement (not req. for all)
         self.exit_clear_visual = bool(exit_clear_visual)        # on state exit, clear all visual data? (new gate)
-        self.exit_clear_visual = bool(exit_clear_gate)          # on state exit, reset current gate
+        self.exit_clear_gate = bool(exit_clear_gate)          # on state exit, reset current gate
         self.detection_active = bool(detection_active_bool)     # detection active?
         self.nav_active = nav_active_str                        # which navigation should be active
         self.gate_color = gate_color                            # color of the gate
@@ -728,7 +724,6 @@ def bebop2track_transform_odom(bebop_odom):
 
     bebop_vel_body = np.array([twist.x,twist.y,twist.z])
 
-
     R_body2track = tfs.rotation_matrix(hdg_bebop+track_bebop_dhdg,(0,0,1))[0:3,0:3]
 
     track_vel_body = np.matmul(R_body2track,bebop_vel_body)
@@ -743,12 +738,12 @@ def bebop2track_transform_odom(bebop_odom):
     track_odom.pose.pose.position.y = track_pos[1]
     track_odom.pose.pose.position.z = track_pos[2]
 
-    track_hdg = tfs.quaternion_multiply(bebop_q,tfs.quaternion_from_euler(0,0,track_bebop_dhdg))
+    track_quat = tfs.quaternion_multiply(tfs.quaternion_from_euler(0,0,hdg_bebop+track_bebop_dhdg),bebop_q)
 
-    track_odom.pose.pose.orientation.x = track_hdg[0]
-    track_odom.pose.pose.orientation.y = track_hdg[1]
-    track_odom.pose.pose.orientation.z = track_hdg[2]
-    track_odom.pose.pose.orientation.w = track_hdg[3]
+    track_odom.pose.pose.orientation.x = track_quat[0]
+    track_odom.pose.pose.orientation.y = track_quat[1]
+    track_odom.pose.pose.orientation.z = track_quat[2]
+    track_odom.pose.pose.orientation.w = track_quat[3]
     
     return track_odom
 
@@ -764,7 +759,12 @@ def update_pose_estimate():
     #     if bebop_last_known_pos is not None:
     bebop_model.propagate(1.0/loop_rate)
 	
-    publisher_model.publish(bebop_model.get_drone_pose())
+    temp_pose = bebop_model.get_drone_pose()
+    temp_odom = Odometry()
+    temp_odom.pose.pose = temp_pose
+
+    publisher_model.publish(temp_pose)
+    publisher_model_odom.publish(temp_odom)
     
 	# calculate distance from WP
     navigation_distance = calculate_distance()
@@ -843,7 +843,7 @@ if __name__ == '__main__':
     nav_active = "off"                                          # activated navigation algorithm
     
     
-
+ 
     # PID Controller Classes
     nav_PID_z = cr.PID(1.0, 0, 0.0)
     nav_PID_r = cr.PID(0.5, 0, 1.0)
@@ -877,6 +877,7 @@ if __name__ == '__main__':
     publisher_state_auto = rospy.Publisher(         "/auto/state_auto",         Int32,                  queue_size=1, latch=True)
     publisher_auto_drive = rospy.Publisher(         "/auto/auto_drive",         Twist,                  queue_size=1, latch=True)
     publisher_model = rospy.Publisher(              "/auto/pose",               Drone_Pose,             queue_size=1, latch=True)
+    publisher_model_odom = rospy.Publisher(         "/auto/pose_odom",          Odometry,               queue_size=1, latch=True)
 
     publisher_wp_blind = rospy.Publisher(           "/auto/wp_blind",           WP_Msg,                 queue_size=1, latch=True)
     publisher_wp_look = rospy.Publisher(            "/auto/wp_look",            WP_Msg,                 queue_size=1, latch=True)
