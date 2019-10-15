@@ -327,10 +327,10 @@ class Gate:
 class Bebop_Model:
 	def __init__(self,pos,hdg):
 		self.pos = np.array(pos) # global position
-		self.vel = np.array([0,0,0]) # global velocity
-		self.att = np.array([0,0,0]) # roll pitch yaw, FRD
-		self.cmd_att = np.array([0,0,0,0]) # roll pitch yaw, FRD
-		self.body_vel = np.array([0,0,0])
+		self.vel = np.array([0.0,0.0,0.0]) # global velocity
+		self.att = np.array([0.0,0.0,0.0]) # roll pitch yaw, FRD
+		self.cmd_att = np.array([0.0,0.0,0.0,0.0]) # roll pitch yaw, FRD
+		self.body_vel = np.array([0.0,0.0,0.0])
 
 		self.max_tilt = 40*math.pi/180
 		self.roll_rate = 1.5*math.pi
@@ -414,26 +414,32 @@ class Bebop_Model:
 	# Update based on relative gate location
 	def update_pose_gate(self,data,gate):
 		meas_vec = np.array([data.pos.x, data.pos.y, data.pos.z])
-		meas_hdg = data.hdg
+		meas_hdg = data.hdg*1.0
 
 		gate_hdg = gate.hdg
 		gate_pos = gate.pos
 
+		R_gate = tfs.rotation_matrix(gate_hdg,(0,0,1))[0:3,0:3]
+		
+		
 
-		R_gate = tfs.rotation_matrix(meas_hdg,(0,0,1))[0:2][0:2]
-		print R_gate
-		print -meas_vec
-		print gate_pos
+		gate_proj = np.matmul(R_gate,-meas_vec)
 
-		pos_new = gate_pos + np.matmul(R_gate,-meas_vec)
+		pos_new = gate_pos.pos + gate_proj
 
-		theta_new = gate_hdg - meas_hdg
-		R_body2track = tfs.rotation_matrix(theta_new,(0,0,1))[0:2][0:2]
+		theta_new = gate_hdg + meas_hdg
+		
+		R_body2track = tfs.rotation_matrix(theta_new,(0,0,1))[0:3,0:3]
 		self.vel = np.matmul(R_body2track,self.body_vel)
 
+		# print 'Meas_vec: ',meas_vec
+		# print 'Proj_vec: ',gate_proj
+		# print 'Gate_pos: ',gate_pos.pos
+		# print '_Old_pos: ',self.pos
+		# print '_New_pos: ',pos_new
 		self.pos = pos_new
 		self.att[2] = theta_new
-
+		
 		self.update_pose()
 
 

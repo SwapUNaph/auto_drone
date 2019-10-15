@@ -26,9 +26,8 @@ def signal_handler(_, __):
     sys.exit(0)
 
 
-# needs fixes
-def navigate_through():
-    # navigation algorithm to carry us onto the centerline and up to the gate
+
+def navigate_gate():
     
 
     # navigation algorithm to fly us to WPs    
@@ -53,47 +52,53 @@ def navigate_through():
 
 
     # heading of the gate itself
-    gate_theta = current_gate.hdg
+    theta_gate = current_gate.hdg
     
     # heading from drone to gate position
-    pos_theta = math.atan2(diff_global[1], diff_global[0])
+    theta_pos = math.atan2(diff_global[1], diff_global[0])
     
     # difference between the two headings
-    d_theta = cr.wrap2pi(gate_theta - pos_theta)
+    d_theta = cr.wrap2pi(theta_gate - theta_pos)
     
 
 
     # LATERAL CONTROLLER
 
-    # lateral deviation from centerline
-    lat_error = -dist * math.sin(d_theta)
-    nrm_error = cr.min_value(dist * math.cos(d_theta), 0.1)
-    
-
-    # axial deviation to gate
-    if dist > 2:
-        # if further than 2m: be within 30 degrees to get x velocity desired
-        x_vel_des = x_pos_error*max(cr.limit_value(1-6*abs(d_theta)/math.pi, 1.0), 0)
-    else:
-        # if closer than 2m: be within 13 degrees to get x velocity desired
-        x_vel_des = x_pos_error*max(cr.limit_value(1-14*abs(d_theta)/math.pi, 1.0), -.25)
-
-
-        
-    
-
-
     x_pos_proj = lin_pos.x + global_vel[0] * point_time_proj
     y_pos_proj = lin_pos.y + global_vel[1] * point_time_proj
 
-    
-    x_vel_des_proj = cr.limit_value( point_vel_slope * (target[0] - x_pos_proj), point_nav_des_vel)
-    y_vel_des_proj = cr.limit_value( point_vel_slope * (target[1] - y_pos_proj), point_nav_des_vel)
+    diff_global_proj = current_state.fly.pos - np.array([x_pos_proj,y_pos_proj,0.0])
 
+    theta_pos_proj = math.atan2(diff_global_proj[1], diff_global_proj[0])
+
+    dist_proj = math.hypot(diff_global_proj[0],diff_global_proj[1])
+
+    d_theta_proj = cr.wrap2pi(theta_gate - theta_pos_proj)
+
+    lat_error_proj = dist_proj * d_theta_proj
+    nrm_error_proj = dist_proj
+
+
+
+    if abs(d_theta) > gate_nav_theta_start:
+        desired_norm_pos = gate_nav_hold_dist
+    elif abs(d_theta) > gate_nav_theta_thr:
+        desired_norm_pos = gate_nav_hold_dist * (d_theta - gate_nav_theta_thr)/(gate_nav_theta_start - gate_nav_theta_thr)
+    else:
+        desired_norm_pos = 0
+
+
+    lat_vel_des_proj = cr.limit_value( point_vel_slope * (-lat_error_proj), gate_nav_des_vel_lat)
+    nrm_vel_des_proj = cr.limit_value( point_vel_slope * (desired_norm_pos - nrm_error_proj), gate_nav_des_vel_nrm)
+
+    
+    x_vel_des_proj = -lat_vel_des_proj * math.sin(theta_pos_proj) - nrm_vel_des_proj * math.cos(theta_pos_proj)
+    y_vel_des_proj = lat_vel_des_proj * math.cos(theta_pos_proj) - nrm_vel_des_proj * math.sin(theta_pos_proj)
+    
     
     x_vel_error = x_vel_des_proj - global_vel[0]
     y_vel_error = y_vel_des_proj - global_vel[1]
-
+    
 
     # min_arrive_time = .1
     # x_arrive_time = max(diff_global[0]/global_vel[0],min_arrive_time)
@@ -116,7 +121,7 @@ def navigate_through():
     nav_cmd_y = (y_theta_des * 180 / np.pi) / 40
 
 
-
+    
 
 
     # limit commands
@@ -213,7 +218,7 @@ def navigate_through():
     return msg
 
 
-# needs to be more aggresive
+
 def navigate_point():
 	
     # navigation algorithm to fly us to WPs    
@@ -456,9 +461,8 @@ def callback_visual_gate_detection_changed(data):
         gate_detected = False
 
 
-
     if nav_active == 'through' and gate_detected:
-            rospy.loginfo('Updating pose from gate: '+str(data.pos)+', '+str(data.hdg)+', '+str(data.format))
+            rospy.loginfo('Updating pose from gate: '+str(math.hypot(data.pos.x,data.pos.y))+', '+str(data.pos.z)+', '+str(data.hdg)+', '+str(data.format))
             bebop_model.update_pose_gate(data,current_gate)
 
     
@@ -670,10 +674,10 @@ def update_controller():
             send_bebop_cmd(auto_driving_msg)
     
     elif nav_active == "through":
-        auto_driving_msg = navigate_through()
+        auto_driving_msg = navigate_gate()
         send_bebop_cmd(auto_driving_msg)
         
-       
+
 
 class State:
     # This is the ominous state machine
@@ -810,7 +814,6 @@ class State:
 
 
 
-
 def emergency_shutdown(_):
     # if this is triggered, it shuts off node for performance reasons
     rospy.loginfo("emergency shutdown")
@@ -875,7 +878,13 @@ if __name__ == '__main__':
     point_vel_slope = 2.0                                      # Desired vel slope
     point_lateral_gain = 1.0                                    # Lateral command gain
     point_nav_limit_lat = .2                                    # lateral command limit
-    
+
+        
+    gate_nav_hold_dist = 2
+    gate_nav_theta_start = 20 * np.pi/180.0
+    gate_nav_theta_thr = 10 * np.pi/180.0
+    gate_nav_des_vel_lat = 1.5
+    gate_nav_des_vel_nrm = 1.0
 
 
     nav_limit_z = .2                                            # Z command limit
@@ -947,7 +956,7 @@ if __name__ == '__main__':
     
 
 
-    init_state = 10
+    init_state = 8
 
     # own_state, next_state, condition_type, condition_thres, exit_clear_visual, reset_gate, detection_active_type, nav_active_str, gate_color, fly, look, gate)
     
@@ -1011,14 +1020,14 @@ if __name__ == '__main__':
     publisher_state_auto.publish(0)
 
     
-    while bebop_odometry is None:
-        time.sleep(.5)
+    # while bebop_odometry is None:
+    #     time.sleep(.5)
     
-    update_last_known_bebop(bebop_odometry)
+    # update_last_known_bebop(bebop_odometry)
 
-    rospy.loginfo("Waiting for autonomy")
-    while not autonomy_active:
-        time.sleep(.25)
+    # rospy.loginfo("Waiting for autonomy")
+    # while not autonomy_active:
+    #     time.sleep(.25)
     
 
     
@@ -1037,7 +1046,7 @@ if __name__ == '__main__':
     while not rospy.is_shutdown():
 		rospy.loginfo('Controller Loop')
 		update_pose_estimate()
-		update_controller()
+		# update_controller()
 		rate.sleep()
         
 
