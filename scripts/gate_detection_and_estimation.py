@@ -1,8 +1,8 @@
 #!/usr/bin/python
 '''
-Program description: The node gets the drone pose, velocity and gate id 
-                        and publishes the gate pose (raw and filtered), 
-                        correct drone_pose.
+Program description: The node gets the drone pose, velocity from bebop node
+                        and publishes the gate pose (raw and filtered) and gate
+                        type (left, right, up or down).
 Author: Swapneel Naphade (snaphade@umd.edu)
 version: 1.0
 Date: 10/4/19
@@ -25,6 +25,7 @@ import cv2
 from common_resources import *
 from time import time
 from cv_bridge import CvBridge, CvBridgeError
+from tf import transformations as tfs
 
 
 ######################  Detection Parameters  ##########################
@@ -35,8 +36,8 @@ NOT_GATE_SIZE = 0.8
 
 
 # HSV thresholds for LED gate
-hsv_thresh_low = (0, 0, 200)
-hsv_thresh_high = (180, 150, 255)
+hsv_thresh_low = (0, 0, 250)
+hsv_thresh_high = (180, 20, 255)
 
 # HSV thresholds for non-LED gate
 not_gate_hsv_thresh_low = (0, 0, 0)
@@ -47,7 +48,7 @@ AREA_THRESH = 1000
 ASPECT_RATIO_THRESH_LOW = 0.7 # Should be between 0.0 and 1.0
 ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
 SOLIDITY_THRESH = 0.90
-ROI_MEAN_THRESH = 80
+ROI_MEAN_THRESH = 20
 
 DETECTION_ACTIVE = True
 GATE_TYPE_VERTICAL = None
@@ -74,9 +75,9 @@ drone_angular_vel = np.zeros(3, float)
 
 ##########################  Filters   ##################################
 # MVA filters
-orientationFilter = MVA(25)
-translationFilter = MVA(10)
-headingBiasFilter= MVA(25)
+orientationFilter = MVA(20)
+translationFilter = MVA(5)
+headingBiasFilter= MVA(20)
 
 # Loop Frequency (important for kalman filtering)
 LOOP_FREQ = 30
@@ -420,18 +421,17 @@ if __name__ == '__main__':
                 KF.C = np.eye(KF.C.shape[0], dtype='float') # Use measurements to fuse with predictions
                 
             # Kalman Filtering
-            #euler = orientationFilter.update(raw_euler)
-            #tvec = translationFilter.update(raw_tvec)
-            
+            euler = orientationFilter.update(raw_euler)         
+            gateHeading = filterHeading(euler[2], drone_orientation[2])
+    
             mva_tvec = translationFilter.update(raw_tvec)
+            
             Y = mva_tvec.reshape((3,1))
             U = drone_linear_vel.reshape((3,1))
             KF.dt = (time() - start)
+            KF.B = -tfs.rotation_matrix(gateHeading, (0,0,1))[:3,:3]
             KF.filter(U,Y)
             X = KF.X.copy()
-    
-            euler = orientationFilter.update(raw_euler)         
-            gateHeading = filterHeading(euler[2], drone_orientation[2])
 
             filtered_gate_WP = array2WP(X, gateHeading, gate_type_string)
             gate_WP = array2WP(raw_tvec, raw_euler[2], "")
