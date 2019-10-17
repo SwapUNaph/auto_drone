@@ -1,5 +1,6 @@
 from __future__ import print_function
 import cv2
+import numpy as np
 
 folder_name = "videos/"
 filename = "threshold.txt"
@@ -13,6 +14,148 @@ low_V = 0
 high_H = max_value_H
 high_S = max_value
 high_V = max_value
+
+
+######################  Detection Parameters  ##########################
+
+# Gate size in meters
+GATE_SIZE = 1.20
+NOT_GATE_SIZE = 0.8
+
+
+# HSV thresholds for LED gate
+#hsv_thresh_low = (0, 0, 250)
+#hsv_thresh_high = (180, 20, 255)
+
+# Gate thresholds
+AREA_THRESH = 1000
+ASPECT_RATIO_THRESH_LOW = 0.7 # Should be between 0.0 and 1.0
+ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
+SOLIDITY_THRESH = 0.90
+ROI_MEAN_THRESH = 100
+
+DETECTION_ACTIVE = True
+GATE_TYPE_VERTICAL = None
+
+########################################################################
+
+def aspectRatio(contour):
+    x,y,w,h = cv2.boundingRect(contour)
+    return float(w)/h
+
+def solidity(contour):
+    hull_area = cv2.contourArea(cv2.convexHull(contour))
+    if (hull_area != 0) :
+        return float(cv2.contourArea(contour))/hull_area
+    else:
+        return 0
+
+def annotateCorners(contour, img):
+    contour = contour.reshape(4,2).tolist()
+    count = 1
+    for point in contour:
+        cv2.circle(img, (point[0], point[1]), 10, (0,255,255), 2)
+        #cv2.putText(img, str(count), (point[0], point[1]), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
+        count = count + 1
+
+def contourROIMean(contour, img):
+    x,y,w,h = cv2.boundingRect(contour)
+    return img[y:y+h, x:x+w].mean()
+
+
+def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
+    '''
+    Description: The function takes in an image and hsv threshold values, detects 
+                the largest 4-sided polygon and returns its corner coordinates.
+    @params: 
+    img: CV2 RGB Image
+    hsv_threshold_low: Low threshold for color detection in HSV format, numpy array of length 3
+    hsv_threshold_high: High threshold for color detection in HSV format, numpy array of length 3
+
+    @return:
+    contour: Numpy array of 4 coordinates of contour corners or None if no gate detected
+    '''
+    # Convert to HSV
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    #cv2.imshow('hsv', hsv)
+
+    # Mask
+    mask = cv2.inRange(hsv, hsv_thresh_low, hsv_thresh_high)
+    #print(mask)
+    #cv2.imshow('mask', mask)
+
+    # Blur 
+    blur = cv2.GaussianBlur(mask,(3,3), 3)
+    #cv2.imshow('Blur', blur)
+
+    # Find contours
+    contours, hierarchy = cv2.findContours(blur, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    #print("Contour_list: {}".format(contours))
+
+    # Draw all contours
+    #contour_img = img.copy()
+    #cv2.drawContours(contour_img, contours, -1, (0, 255, 0), 1)
+    #cv2.imshow('contour_img', contour_img)
+    
+    # Filter contour by area: area > 5 % of image area
+    contours = list(filter(lambda x: (cv2.contourArea(x) > AREA_THRESH) , contours))
+    #print("Contours after area filter: %d" % len(quadrlFiltered))
+    
+    # Approximate quadrilaterals
+    quadrlFiltered=[]
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt,0.05*cv2.arcLength(cnt,True),True)
+        if len(approx) == 4:
+            quadrlFiltered.append(approx)
+            
+    #print("Contours before all filters: %d" % len(quadrl))
+            
+    # Filter contour by area: area > 5 % of image area
+    #quadrlFiltered = list(filter(lambda x: (cv2.contourArea(x) > AREA_THRESH) , quadrlFiltered))
+    #print("Contours after area filter: %d" % len(quadrlFiltered))
+
+    # Filter contour by solidity > 0.9
+    quadrlFiltered = list(filter(lambda x: (solidity(x) > SOLIDITY_THRESH) , quadrlFiltered))
+    #print("Contours after solidity filter: %d" % len(quadrlFiltered))
+
+    # Filter contour by aspect ratio: 1.20 > AR > 0.8
+    quadrlFiltered = list(filter(lambda x: (aspectRatio(x) > ASPECT_RATIO_THRESH_LOW) & (aspectRatio(x) < ASPECT_RATIO_THRESH_HIGH) , quadrlFiltered))
+    #print("Contours after aspect ratio filter: %d" % len(quadrlFiltered))
+
+    # Filter contour by ROI mean
+    quadrlFiltered = list(filter(lambda x: contourROIMean(x, blur) < ROI_MEAN_THRESH , quadrlFiltered))
+    #print("Contours after aspect ratio filter: %d" % len(quadrlFiltered))
+
+    #print("Square contour areas:")
+    #for sq in quadrlFiltered:
+        #print(cv2.contourArea(sq))
+
+    # Sort quadrilaterals by area
+    quadrlFiltered = sorted(quadrlFiltered, key=lambda x: cv2.contourArea(x))
+
+    
+    if len(quadrlFiltered) > 0:
+        # Get the largest contour
+        gate_contour = quadrlFiltered[-1].reshape(4,2)
+        
+        # Sort the points starting with top left and going counter-clockwise
+        center = gate_contour.mean(axis=0)
+        gate_cnt_sorted = [None]*4
+        for point in gate_contour:
+            if point[0] < center[0] and point[1] < center[1]:
+                    gate_cnt_sorted[0] = point
+            elif point[0] < center[0] and point[1] >= center[1]:
+                    gate_cnt_sorted[1] = point
+            elif point[0] >= center[0] and point[1] < center[1]:
+                gate_cnt_sorted[3] = point
+            else:
+                gate_cnt_sorted[2] = point
+                
+        gate_cnt_sorted_np = np.array(gate_cnt_sorted)
+        return gate_cnt_sorted_np
+    else:
+        #print("No gate detected!")
+        return None
 
 with open(filename, 'r') as th_file:
     vals = th_file.readlines()[0].split(" ")
@@ -121,12 +264,15 @@ while True:
     frame_HSV = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     frame_threshold = cv2.inRange(frame_HSV, (low_H, low_S, low_V), (high_H, high_S, high_V))
 
+    gate = detect_gate(frame, (low_H, low_S, low_V), (high_H, high_S, high_V))
+            
+    # If gate detected succesfully
+    if gate is not None and np.array_equal(gate.shape, [4,2]):
+        cv2.drawContours(frame, [gate.reshape(4,2)], 0, (255, 0, 0), 2)
+        annotateCorners(gate, frame)  
+                
     cv2.imshow(window_capture_name, frame)
     cv2.imshow(window_detection_name, frame_threshold)
-
-    # if frame_count == cap.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT):
-    #     frame_count = 0  # Or whatever as long as it is the same as next line
-    #     cap.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, 0)
 
     key = cv2.waitKey(100)
     if key == ord('q') or key == 27:

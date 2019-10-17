@@ -37,7 +37,7 @@ NOT_GATE_SIZE = 0.8
 
 # HSV thresholds for LED gate
 hsv_thresh_low = (0, 0, 250)
-hsv_thresh_high = (180, 20, 255)
+hsv_thresh_high = (180, 50, 255)
 
 # HSV thresholds for non-LED gate
 not_gate_hsv_thresh_low = (0, 0, 0)
@@ -48,7 +48,7 @@ AREA_THRESH = 1000
 ASPECT_RATIO_THRESH_LOW = 0.7 # Should be between 0.0 and 1.0
 ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
 SOLIDITY_THRESH = 0.90
-ROI_MEAN_THRESH = 20
+ROI_MEAN_THRESH = 100
 
 DETECTION_ACTIVE = True
 GATE_TYPE_VERTICAL = None

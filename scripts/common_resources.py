@@ -454,7 +454,7 @@ class Bebop_Model:
 	def update_orientation(self,odom):
 		
 		quat = odom.pose.pose.orientation
-		att_temp = tfs.euler_from_quaternion([quat.x, quat.y, quat.z, quat.w])1
+		att_temp = tfs.euler_from_quaternion([quat.x, quat.y, quat.z, quat.w])
 		self.att = np.array(att_temp)
 
 		temp_vel = odom.twist.twist.linear
