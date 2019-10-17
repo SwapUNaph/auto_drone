@@ -30,24 +30,24 @@ from cv_bridge import CvBridge, CvBridgeError
 ######################  Detection Parameters  ##########################
 
 # Gate size in meters
-GATE_SIZE = 1.25
+GATE_SIZE = 1.20
 NOT_GATE_SIZE = 0.8
 
 
 # HSV thresholds for LED gate
-hsv_thresh_low = (0, 0, 250)
-hsv_thresh_high = (180, 255, 255)
+hsv_thresh_low = (0, 0, 200)
+hsv_thresh_high = (180, 150, 255)
 
 # HSV thresholds for non-LED gate
 not_gate_hsv_thresh_low = (0, 0, 0)
 not_gate_hsv_thresh_high = (180, 255, 100)
 
 # Gate thresholds
-AREA_THRESH = 2000
+AREA_THRESH = 1000
 ASPECT_RATIO_THRESH_LOW = 0.7 # Should be between 0.0 and 1.0
 ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
 SOLIDITY_THRESH = 0.90
-ROI_MEAN_THRESH = 100
+ROI_MEAN_THRESH = 80
 
 DETECTION_ACTIVE = True
 GATE_TYPE_VERTICAL = None
@@ -74,16 +74,21 @@ drone_angular_vel = np.zeros(3, float)
 
 ##########################  Filters   ##################################
 # MVA filters
-orientationFilter = MVA(20)
-#translationFilter = MVA(15)
+orientationFilter = MVA(25)
+translationFilter = MVA(10)
+headingBiasFilter= MVA(25)
 
 # Loop Frequency (important for kalman filtering)
-LOOP_FREQ = 60
+LOOP_FREQ = 30
 
 #Process Noise and Sensor noise
 PROCESS_NOISE = 0.01	# Variance of process noise
 SENSOR_NOISE = 0.1		# Variance of sensor noise
 
+# Headingcomplementory filter gain
+HEADING_FILTER_GAIN = 0.3  # Weight for measurement reading
+
+'''
 def gatePoseDynamics(X,U,dt=1,noise=False):
   v = U[:3].reshape(1,3)
   w = U[3:].reshape(1,3)
@@ -112,6 +117,8 @@ def jacobianB(X,U):
                     [0,0,0,0,-1,0],
                     [0,0,0,0,0,-1]] )
  
+'''
+
 # A,B,C,Q,R
 A = np.zeros((3, 3), float)
 B = -np.eye(3, dtype='float')
@@ -129,6 +136,20 @@ X0 = np.zeros((3,1))
 # Instantiate KF
 #KF = ExtendedKalmanFilter(gatePoseDynamics, jacobianA, jacobianB, C, Q, R, X0, dt=1.0/LOOP_FREQ)
 KF = KalmanFilter(A,B,C,Q,R,X0,dt=0.1)
+
+# Heading estimator
+def filterHeading(measuredHdg, droneHdg):
+    
+    headingBias = headingBiasFilter.update(measuredHdg + droneHdg)
+    
+    if np.cos(headingBias) >= 0.5:
+        headingBias = 0
+    elif np.cos(headingBias) <= -0.5:
+        headingBias = np.pi
+        
+    return (measuredHdg + HEADING_FILTER_GAIN * (measuredHdg - (headingBias - droneHdg)) )
+
+        
 ########################################################################
 	
 def signal_handler(_, __):
@@ -282,8 +303,8 @@ def getGatePose(contour, gate_side):
     dRc = np.array([[0,0,1],[-1,0,0],[0,-1,0]])
 
     ############################  For CaliCam    ##################################
-    cameraMatrix = np.array([[ 258.58131479, 0.0 , 348.1852167 ], [0.0 , 257.25344992, 219.07752178], [0.0 , 0.0, 1.0]])
-    distCoeffs = np.array([[-0.36310169,  0.10981468,  0.0057042,  -0.001884,   -0.01328491]])
+    cameraMatrix = np.array([[ 223.47508211, 0.0, 348.03017129], [0.0, 225.41305757, 215.59249353], [0.0, 0.0, 1.0]] )
+    distCoeffs = np.array([-0.26163237,  0.05491025,  0.0056113,  -0.0013107,  -0.00456478])
 
     ###############################################################################
 
@@ -362,6 +383,7 @@ if __name__ == '__main__':
     rate = rospy.Rate(LOOP_FREQ) # LOOP_FREQ hz
 
     start = time()
+    gate_type_string = "no_gate"
     
     while not rospy.is_shutdown():
         start = time()
@@ -381,31 +403,42 @@ if __name__ == '__main__':
                 cv2.drawContours(img, [gate.reshape(4,2)], 0, (255, 0, 0), 2)
                 annotateCorners(gate, img)  
                 raw_euler, raw_tvec = getGatePose(gate, GATE_SIZE)
-                KF.C = np.eye(KF.C.shape[0], dtype='float') # Use measurements to fuse with predictions
-            else:
-				raw_euler = np.zeros(3, float)
-				raw_tvec = np.zeros(3, float)
-				KF.C = np.zeros(KF.C.shape, float) # No measurements, rely only on prediction
                 
-			# Kalman Filtering
+                if raw_euler[2] > np.pi or (np.linalg.norm(raw_tvec) > 30):
+                    gate_type_string = "no_gate"
+                else:
+                    gate_type_string = "gate"
+                    
+            else:
+                gate_type_string = "no_gate"
+                
+            if gate_type_string == "no_gate":
+                raw_euler = np.zeros(3, float)
+                raw_tvec = np.zeros(3, float)
+                KF.C = np.zeros(KF.C.shape, float) # No measurements, rely only on prediction
+            else:  
+                KF.C = np.eye(KF.C.shape[0], dtype='float') # Use measurements to fuse with predictions
+                
+            # Kalman Filtering
             #euler = orientationFilter.update(raw_euler)
             #tvec = translationFilter.update(raw_tvec)
             
-            Y = raw_tvec.reshape((3,1))
+            mva_tvec = translationFilter.update(raw_tvec)
+            Y = mva_tvec.reshape((3,1))
             U = drone_linear_vel.reshape((3,1))
             KF.dt = (time() - start)
             KF.filter(U,Y)
             X = KF.X.copy()
     
-            euler = orientationFilter.update(raw_euler)
-            
-            #logMeasuredGatePose(X)
-            filtered_gate_WP = array2WP(X, euler[2], "")
+            euler = orientationFilter.update(raw_euler)         
+            gateHeading = filterHeading(euler[2], drone_orientation[2])
+
+            filtered_gate_WP = array2WP(X, gateHeading, gate_type_string)
             gate_WP = array2WP(raw_tvec, raw_euler[2], "")
             gate_pose_pub.publish(gate_WP)
             filtered_gate_pose_pub.publish(filtered_gate_WP) 
             
-            rospy.loginfo("LOOP Time: {} s".format(time() - start))
+            rospy.loginfo("LOOP Frequency: {} Hz".format(1/(time() - start)))
             #img = cv2.resize(img, None, fx=0.25, fy=0.25)   
             image_publisher.publish(bridge.cv2_to_imgmsg(img,"bgr8"))
          

@@ -388,6 +388,7 @@ def calculate_distance():
 
 
     elif nav_active == "through":
+        return 0
         # in any through navigation, use a plane instead that is parallel to gate itself. Eventually it doesn't matter
         # how far we are from the gate in 3D but how far we are from the plane of the gate
         flat_distance = np.linalg.norm([diff_global[0], diff_global[1], 0])
@@ -396,143 +397,7 @@ def calculate_distance():
         heading_difference = heading_to_gate - heading_of_gate
         return flat_distance * math.cos(heading_difference)
 
-        
-
-class State:
-    # This is the ominous state machine
-    def __init__(self, own_state=None, next_state=None, condition_type=None, condition_thres=None,
-                 exit_clear_visual=None, exit_clear_gate=None, detection_active_bool=None, nav_active_str=None,
-                 gate_color=None, fly=None, look=None,gate_orientation=None,gate_current=None):
-        self.own_state = own_state                              # own state id
-        self.next_state = next_state                            # next state id
-        self.condition_type = condition_type                    # type of state advancement
-        self.condition_thres = condition_thres                  # value for state advancement (not req. for all)
-        self.exit_clear_visual = bool(exit_clear_visual)        # on state exit, clear all visual data? (new gate)
-        self.exit_clear_gate = bool(exit_clear_gate)          # on state exit, reset current gate
-        self.detection_active = bool(detection_active_bool)     # detection active?
-        self.nav_active = nav_active_str                        # which navigation should be active
-        self.gate_color = gate_color                            # color of the gate
-        self.fly = fly                                          # if blind waypoint should be calculated: offset for
-        self.look = look                                        # flying and looking waypoint into gate direction
-        self.time = None                                        # timer for takeoff wait
-        self.gate_orientation = gate_orientation                # If it needs to guess the gate
-        self.current_gate = gate_current                        # on enter, set current_gate to the correct gate class variable
-
-
-    def enter(self):
-        # do things when state is selected
-        print("enter state " + str(self.own_state))
-        # change global state id and also publish state id
-        global current_state
-        current_state = states[self.own_state]
-        publisher_state_auto.publish(self.own_state)
-
-        # reset all PID loops
-        nav_PID_z.reset()
-        nav_PID_r.reset()
-
-        # if timer is required for condition, start timer
-        if self.condition_type == "time":
-            self.time = time.time()
-
-
-        # if gate color is defined, publish gate color
-        if self.gate_color is not None:
-            msg = Float32MultiArray()
-            msg.data = self.gate_color
-            publisher_gate_color.publish(msg)
-        
-        # set applicable navigation
-        global nav_active
-        nav_active = self.nav_active
-
-        # set detection to on/off
-        global detection_active
-        detection_active = self.detection_active
-
-
-        # Initialize current gate to gate found
-        if self.current_gate is not None:
-            global current_gate
-            current_gate = self.current_gate
-
-
-        print '\n\n\n\n\n\nshould be printing now\n\n\n\n\n\n'
-        # publish blind WP for ground control station
-        if self.look is not None:
-            msg = WP_Msg()    
-            msg.pos.x = self.look.pos[0]
-            msg.pos.y = self.look.pos[1]
-            msg.pos.z = self.look.pos[2]
-            msg.hdg = 0
-            global publisher_wp_look 
-            publisher_wp_look.publish(msg)
-
-        
-        # publish look WP for ground control station
-        if self.fly is not None:
-            msg = WP_Msg()
-            msg.pos.x = self.fly.pos[0]
-            msg.pos.y = self.fly.pos[1]
-            msg.pos.z = self.fly.pos[2]
-            if self.fly.hdg is not None:
-                msg.hdg = self.fly.hdg
-
-            global publisher_wp_fly 
-            publisher_wp_fly.publish(msg)
-
-
-        print '\n\n\n\n\n\ndone publishing now\n\n\n\n\n\n'
-
-
-        
-    def exit(self):
-        # do things when state is finished
-        print("exit state " + str(self.own_state))
-
-        # if visuals should be cleared, do it now (preparation for next gate)
-        if self.exit_clear_visual:
-            pass
-
-        if self.exit_clear_gate:
-            global gate_last_meas_time
-            global current_gate
-            global gate_detected
-
-            gate_detected = False
-            gate_last_meas_time = None
-            current_gate.reset()
-
-        # enter new state
-        states[self.next_state].enter()
-
-
-    def check(self, navigation_distance):
-        # setup state advancement condition
-        rospy.loginfo("state " + str(state_auto))
-
-        # distance: if distance is smaller than value (could be scaled if there is a scale)
-        if self.condition_type == "dist":
-            if navigation_distance < self.condition_thres:
-                self.exit()
-
-        # waypoint: if average waypoint is found (not None anymore). visual_wp is "locked on"
-        elif self.condition_type == "wp":
-            if gate_average is not None:
-                self.exit()
-
-        # specific condition of bebop state machine (hover, land, ...)
-        elif self.condition_type == "bebop":
-            if state_bebop == self.condition_thres:
-                self.exit()
-
-        # some time has elapsed (on takeoff). Required because magnetometer changes a lot while motors spin up and drone
-        # takes off
-        elif self.condition_type == "time":
-            if time.time() > self.time + self.condition_thres:
-                self.exit()
-
-
+ 
 
 def callback_states_changed(data, args):
     # update states, either autonomy state or bebop state
@@ -562,21 +427,21 @@ def callback_visual_gate_detection_changed(data):
     global gate_last_meas_time
     global gate_detected
 
-    if len(data.gate_format) == 0:
+    if len(data.format) == 0:
         pass
 
     else:    
         global current_gate
         if current_gate is not None:
 
-            if data.gate_format == 'left' and current_gate.gate_orientation == 'horizontal':
+            if data.format == 'left' and current_gate.gate_orientation == 'horizontal':
                 current_gate.update('left')
-            elif data.gate_format == 'right' and current_gate.gate_orientation == 'horizontal':
+            elif data.format == 'right' and current_gate.gate_orientation == 'horizontal':
                 current_gate.update('right')
 
-            if data.gate_format == 'top' and current_gate.gate_orientation == 'vertical':
+            if data.format == 'top' and current_gate.gate_orientation == 'vertical':
                 current_gate.update('top')
-            elif data.gate_format == 'bottom' and current_gate.gate_orientation == 'vertical':
+            elif data.format == 'bottom' and current_gate.gate_orientation == 'vertical':
                 current_gate.update('bottom')
 
         else:
@@ -808,6 +673,142 @@ def update_controller():
         auto_driving_msg = navigate_through()
         send_bebop_cmd(auto_driving_msg)
         
+       
+
+class State:
+    # This is the ominous state machine
+    def __init__(self, own_state=None, next_state=None, condition_type=None, condition_thres=None,
+                 exit_clear_visual=None, exit_clear_gate=None, detection_active_bool=None, nav_active_str=None,
+                 gate_color=None, fly=None, look=None, gate_current=None):
+        self.own_state = own_state                              # own state id
+        self.next_state = next_state                            # next state id
+        self.condition_type = condition_type                    # type of state advancement
+        self.condition_thres = condition_thres                  # value for state advancement (not req. for all)
+        self.exit_clear_visual = bool(exit_clear_visual)        # on state exit, clear all visual data? (new gate)
+        self.exit_clear_gate = bool(exit_clear_gate)          # on state exit, reset current gate
+        self.detection_active = bool(detection_active_bool)     # detection active?
+        self.nav_active = nav_active_str                        # which navigation should be active
+        self.gate_color = gate_color                            # color of the gate
+        self.fly = fly                                          # if blind waypoint should be calculated: offset for
+        self.look = look                                        # flying and looking waypoint into gate direction
+        self.time = None                                        # timer for takeoff wait
+        self.current_gate = gate_current                        # on enter, set current_gate to the correct gate class variable
+
+
+    def enter(self):
+        # do things when state is selected
+        print("enter state " + str(self.own_state))
+        # change global state id and also publish state id
+        global current_state
+        current_state = states[self.own_state]
+        publisher_state_auto.publish(self.own_state)
+
+        # reset all PID loops
+        nav_PID_z.reset()
+        nav_PID_r.reset()
+
+        # if timer is required for condition, start timer
+        if self.condition_type == "time":
+            self.time = time.time()
+
+
+        # if gate color is defined, publish gate color
+        if self.gate_color is not None:
+            msg = Float32MultiArray()
+            msg.data = self.gate_color
+            publisher_gate_color.publish(msg)
+        
+        # set applicable navigation
+        global nav_active
+        nav_active = self.nav_active
+
+        # set detection to on/off
+        global detection_active
+        detection_active = self.detection_active
+
+
+        # Initialize current gate to gate found
+        if self.current_gate is not None:
+            global current_gate
+            current_gate = self.current_gate
+
+
+        print '\n\n\n\n\n\nshould be printing now\n\n\n\n\n\n'
+        # publish blind WP for ground control station
+        if self.look is not None:
+            msg = WP_Msg()    
+            msg.pos.x = self.look.pos[0]
+            msg.pos.y = self.look.pos[1]
+            msg.pos.z = self.look.pos[2]
+            msg.hdg = 0
+            global publisher_wp_look 
+            publisher_wp_look.publish(msg)
+
+        
+        # publish look WP for ground control station
+        if self.fly is not None:
+            msg = WP_Msg()
+            msg.pos.x = self.fly.pos[0]
+            msg.pos.y = self.fly.pos[1]
+            msg.pos.z = self.fly.pos[2]
+            if self.fly.hdg is not None:
+                msg.hdg = self.fly.hdg
+
+            global publisher_wp_fly 
+            publisher_wp_fly.publish(msg)
+
+
+        print '\n\n\n\n\n\ndone publishing now\n\n\n\n\n\n'
+
+
+        
+    def exit(self):
+        # do things when state is finished
+        print("exit state " + str(self.own_state))
+
+        # if visuals should be cleared, do it now (preparation for next gate)
+        if self.exit_clear_visual:
+            pass
+
+        if self.exit_clear_gate:
+            global gate_last_meas_time
+            global current_gate
+            global gate_detected
+
+            gate_detected = False
+            gate_last_meas_time = None
+            current_gate.reset()
+
+        # enter new state
+        states[self.next_state].enter()
+
+
+    def check(self, navigation_distance):
+        # setup state advancement condition
+        rospy.loginfo("state " + str(state_auto))
+
+        # distance: if distance is smaller than value (could be scaled if there is a scale)
+        if self.condition_type == "dist":
+            if navigation_distance < self.condition_thres:
+                self.exit()
+
+        # waypoint: if average waypoint is found (not None anymore). visual_wp is "locked on"
+        elif self.condition_type == "wp":
+            if gate_average is not None:
+                self.exit()
+
+        # specific condition of bebop state machine (hover, land, ...)
+        elif self.condition_type == "bebop":
+            if state_bebop == self.condition_thres:
+                self.exit()
+
+        # some time has elapsed (on takeoff). Required because magnetometer changes a lot while motors spin up and drone
+        # takes off
+        elif self.condition_type == "time":
+            if time.time() > self.time + self.condition_thres:
+                self.exit()
+
+
 
 
 def emergency_shutdown(_):
@@ -827,10 +828,10 @@ if __name__ == '__main__':
     # Variables
     autonomy_active = False                                     # autonomous mode is active
     
-    start_pos = np.array([-.7, 8, 0])
-    start_hdg = -np.pi/2
-    # start_pos = np.array([0.0, 0.0, 0.0])
-    # start_hdg = 0.0
+    # start_pos = np.array([-.7, 9, 0])
+    # start_hdg = -np.pi/2
+    start_pos = np.array([0.0, 0.0, 0.0])
+    start_hdg = 0.0
 
     
 
@@ -931,7 +932,22 @@ if __name__ == '__main__':
     gate_2 = cr.Gate(h,np.array([1.4, 10.0, 1.7]),np.pi/2)
     
 
-    init_state = 8
+
+    # Test stuff
+
+    start_pos_wp = cr.WP(start_pos+[0,-.5,1.7],None)
+    loop_temp_wp = cr.WP(start_pos+[3,0,1.7],None)
+    loop_2_wp = cr.WP([0,6.5,1.7],None)
+
+    temp_wp1 = cr.WP([2.0, -1.0, 1.5], None)
+    temp_wp2 = cr.WP([4.5, 0.3, 1.5], None)
+    temp_wp3 = cr.WP([2.0, 1.2, 1.5], None)
+    temp_wp4 = cr.WP([0.0, 0.0, 1.5], None)
+    look_audience = cr.WP([1.0, 10.0, 1.5], None)
+    
+
+
+    init_state = 10
 
     # own_state, next_state, condition_type, condition_thres, exit_clear_visual, reset_gate, detection_active_type, nav_active_str, gate_color, fly, look, gate)
     
@@ -943,21 +959,21 @@ if __name__ == '__main__':
 
 
 
-    start_pos_wp = cr.WP(start_pos+[0,-.5,1.7],None)
-    loop_temp_wp = cr.WP(start_pos+[0,10,1.7],None)
-    loop_2_wp = cr.WP([0,6.5,1.7],None)
+    states[8]  = State( 8, 90, "time",  1000.0,            0, 0, 0, t, gate_params1,   gate_1.look_pos,        gate_1.pos,        gate_1)                   # testing 
 
+    # states[10] = State(10, 11, "dist",  0.3,               0, 0, 0, p, None,           gate_1.look_pos,        loop_temp_wp,         None)                   # testing 
+    # states[11] = State(11, 10, "dist",  0.3,               0, 0, 0, p, None,           start_pos_wp,           loop_temp_wp,         None)                   # testing 
 
-    states[8]  = State( 8, 90, "time",  1000.0,            0, 0, 0, t, gate_params1,   gate_1.look_pos,        gate_1.pos,        None)                   # testing 
-
-    states[10] = State(10, 11, "dist",  0.3,               0, 0, 0, p, None,           gate_1.look_pos,        loop_2_wp,         None)                   # testing 
-    states[11] = State(11, 10, "dist",  0.3,               0, 0, 0, p, None,           start_pos_wp,           loop_2_wp,         None)                   # testing 
+    states[10] = State(10, 11, "dist",  0.5,               0, 0, 0, p, None,           temp_wp1,               look_audience,     None)                   # testing 
+    states[11] = State(11, 12, "dist",  0.5,               0, 0, 0, p, None,           temp_wp2,               look_audience,     None)                   # testing 
+    states[12] = State(12, 13, "dist",  0.5,               0, 0, 0, p, None,           temp_wp3,               look_audience,     None)                   # testing 
+    states[13] = State(13, 14, "dist",  0.5,               0, 0, 0, p, None,           temp_wp4,               look_audience,     None)                   # testing 
 
 
     states[14] = State(14, 15, "wp",    None,              0, 0, v, p, gate_params1,   gate_1.look_pos,        gate_1.pos,         gate_1)                 # Move and Look for gate
     states[15] = State(15, 16, "dist",  dist_gate_close,   1, 0, v, t, gate_params1,   gate_1.pos,             gate_1.pos,         gate_1)                 # move through gate until cant see it
     states[16] = State(16, 17, "dist",  exit_thrs,         0, 1, 0, p, None,           gate_1.exit_pos,        turn_pos_1,         None)                   # Move through gate
-    states[17] = State(17, 90, "dist",  dist_gate_blind,   0, 0, 0, p, None,           turn_pos_1,             gate_2.pos,         None)                   # Turn around manuever
+    states[17] = State(17, 14, "dist",  dist_gate_blind,   0, 0, 0, p, None,           turn_pos_1,             gate_2.pos,         None)                   # Turn around manuever
 
 
     '''
@@ -1000,9 +1016,9 @@ if __name__ == '__main__':
     
     update_last_known_bebop(bebop_odometry)
 
-    # rospy.loginfo("Waiting for autonomy")
-    # while not autonomy_active:
-    #     time.sleep(.25)
+    rospy.loginfo("Waiting for autonomy")
+    while not autonomy_active:
+        time.sleep(.25)
     
 
     
@@ -1021,7 +1037,7 @@ if __name__ == '__main__':
     while not rospy.is_shutdown():
 		rospy.loginfo('Controller Loop')
 		update_pose_estimate()
-		# update_controller()
+		update_controller()
 		rate.sleep()
         
 
