@@ -539,7 +539,7 @@ def callback_bebop_odometry_changed(data):
         bebop_model.update_odom(bebop_odom_transformed)
         
 
-    
+
 
 
     elif nav_active == 'through':
@@ -562,6 +562,8 @@ def callback_bebop_odometry_changed(data):
             y_avg = np.mean(np_log[:,1])
             z_avg = np.mean(np_log[:,2])
             avg = [x_avg, y_avg, z_avg]
+
+            gate_log = []
         
             d_pos_gate = avg - last_track_pos
 
