@@ -134,14 +134,14 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     # Mask
     mask = cv2.inRange(hsv, hsv_thresh_low, hsv_thresh_high)
     #print(mask)
-    #cv2.imshow('mask', mask)
+    cv2.imshow('mask', mask)
 
     # Blur 
     blur = cv2.GaussianBlur(mask,(5,5), 3)
-    cv2.imshow('Blur', blur)
+    #cv2.imshow('Blur', blur)
 
     # Find contours
-    contours, hierarchy = cv2.findContours(blur, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    contours, hierarchy = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     #print("Contour_list: {}".format(contours))
 
     # Print solidity
@@ -172,7 +172,7 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     #print("Contours after solidity filter: %d" % len(quadrlFiltered))
 
     # Filter by contour aspect ratio: 1.20 > AR > 0.8
-    quadrlFiltered = list(filter(lambda x: (aspectRatio(x) > 0.9) & (aspectRatio(x) < 1.11) , quadrlFiltered))
+    quadrlFiltered = list(filter(lambda x: (aspectRatio(x) > 0.8) & (aspectRatio(x) < 1.25) , quadrlFiltered))
     #print("Contours after aspect ratio filter: %d" % len(quadrlFiltered))
 
     # Filter by contour mean
@@ -211,7 +211,7 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
             #print("No gate detected!")
             #return None
     else:
-        print("No gate detected!")
+        print("No gate detected!\n")
         return None
 
 
@@ -257,18 +257,18 @@ def getGatePose(contour, objectPoints):
     #dQuatC = [ 0.5, -0.5, 0.5, -0.5 ]
     
     ## Camera Matrix
-    #cameraMatrix = np.array( [[ 258.58131479,    0. ,         348.1852167 ],
-                              #[   0. ,         257.25344992,  219.07752178],
-                              #[   0. ,           0.,            1.        ]]  )
+    cameraMatrix = np.array( [[ 258.58131479,    0. ,         348.1852167 ],
+                              [   0. ,         257.25344992,  219.07752178],
+                              [   0. ,           0.,            1.        ]]  )
     
     ## Distortion Coefficients
-    #distCoeffs = np.array([[-0.36310169,  0.10981468,  0.0057042,  -0.001884,   -0.01328491]]  )
+    distCoeffs = np.array([[-0.36310169,  0.10981468,  0.0057042,  -0.001884,   -0.01328491]]  )
     
     # Camera Matrix 720p 
-    cameraMatrix = np.array([[700, 0.0, 640], [0.0, 700, 360], [0.0, 0.0, 1.0]])
+    #cameraMatrix = np.array([[700, 0.0, 640], [0.0, 700, 360], [0.0, 0.0, 1.0]])
 
     # Distortion Coefficients 720p
-    distCoeffs = np.array([-0.1740500032901764, 0.028304599225521088, 0.0, 0.0, 0.0])
+    #distCoeffs = np.array([-0.1740500032901764, 0.028304599225521088, 0.0, 0.0, 0.0])
     
     # Solve perspective 3 point algorithm
     (success, rvec, tvec) = cv2.solvePnP(objectPoints, contour.reshape(4,2).astype(float), cameraMatrix, distCoeffs)    
@@ -307,7 +307,7 @@ def main():
 
      #[[387 130]]]
 
-    gate_side = 1.4
+    gate_side = 1.15
     objectPoints = np.array([
             (-gate_side/2, -gate_side/2, 0.0),
             (-gate_side/2, gate_side/2, 0.0),
@@ -315,16 +315,16 @@ def main():
             (gate_side/2, -gate_side/2, 0.0)
         ])
     
-    cap = cv2.VideoCapture("videos/avi_fast/blue_moving_fast.avi")
-    #cap = cv2.VideoCapture(0)
+    #cap = cv2.VideoCapture("videos/avi_fast/blue_moving_fast.avi")
+    cap = cv2.VideoCapture(0)
     
     # 2.2K : 4416x1242 : 15 FPS
     # 1080p : 3840x1080 : 30 FPS
     # 720p : 2560x720 : 60 FPS
     # WVGA : 1344x376 : 100 FPS
-    #cap.set(5, 30)    # FPS
-    #cap.set(3, 640)# Image Width
-    #cap.set(4, 480)    # Image Height
+    cap.set(5, 30)    # FPS
+    cap.set(3, 640)   # Image Width
+    cap.set(4, 480)   # Image Height
     #cap.set(12, 0.5) # Saturation
     #cap.set(10, 0.5) # Brightness
     
@@ -364,8 +364,8 @@ def main():
     #hsv_thresh_high = (196, 202, 206)
     
     #All color LEDs : 0 0 191 180 255 255
-    hsv_thresh_low = (0, 0, 0)
-    hsv_thresh_high = (180, 150, 100)
+    hsv_thresh_low = (0, 0, 200)
+    hsv_thresh_high = (180, 100, 255)
     
     # MVA filters
     orntFilter = MVA(15)
