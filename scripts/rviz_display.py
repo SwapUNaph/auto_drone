@@ -330,11 +330,11 @@ class bebop_data:
             marker_array.markers.append(point_marker2)
             if (quat.x + quat.y + quat.z + quat.w) == 0:
                 quat.w = 1
-
+            
             self.tbr.sendTransform((pos.x,pos.y,pos.z),(quat.x,quat.y,quat.z,quat.w),rospy.get_rostime(),'vehicle_frame', "track_frame")
 
             self.vichile_pub.publish(marker_array)
-            
+            print 'sending position'            
             
 
         elif args == "odom":
