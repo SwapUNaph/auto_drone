@@ -60,12 +60,12 @@ def navigate_gate():
     # difference between the two headings
     d_theta = cr.wrap2pi(theta_gate - theta_pos)
     
-
+    
 
     # LATERAL CONTROLLER
 
-    x_pos_proj = lin_pos.x + global_vel[0] * point_time_proj
-    y_pos_proj = lin_pos.y + global_vel[1] * point_time_proj
+    x_pos_proj = bebop_p[0] + global_vel[0] * point_time_proj
+    y_pos_proj = bebop_p[1] + global_vel[1] * point_time_proj
 
     diff_global_proj = current_state.fly.pos - np.array([x_pos_proj,y_pos_proj,0.0])
 
@@ -78,17 +78,18 @@ def navigate_gate():
     lat_error_proj = dist_proj * d_theta_proj
     nrm_error_proj = dist_proj
 
-
+    
 
     if abs(d_theta) > gate_nav_theta_start:
         desired_norm_pos = gate_nav_hold_dist
     elif abs(d_theta) > gate_nav_theta_thr:
         desired_norm_pos = gate_nav_hold_dist * (d_theta - gate_nav_theta_thr)/(gate_nav_theta_start - gate_nav_theta_thr)
     else:
-        desired_norm_pos = 0
+        desired_norm_pos = 0.0
 
+    desired_norm_pos = 2.0
 
-    lat_vel_des_proj = cr.limit_value( point_vel_slope * (-lat_error_proj), gate_nav_des_vel_lat)
+    lat_vel_des_proj = cr.limit_value( point_vel_slope * (lat_error_proj), gate_nav_des_vel_lat)
     nrm_vel_des_proj = cr.limit_value( point_vel_slope * (desired_norm_pos - nrm_error_proj), gate_nav_des_vel_nrm)
 
     
@@ -143,17 +144,9 @@ def navigate_gate():
 
 
     # R CONTROLLER
+    r_error = cr.wrap2pi(theta_pos - hdg)
     
-    diff_global_look = target_look - bebop_p
-    pos_theta = np.arctan2(diff_global_look[1], diff_global_look[0])
-
-    r_error = -(hdg - pos_theta)
-    if r_error > np.pi:
-        r_error = -2 * np.pi + r_error
-    elif r_error < -np.pi:
-        r_error = 2 * np.pi + r_error
-
-    nav_cmd_r = nav_PID_r.update(z_error)
+    nav_cmd_r = nav_PID_r.update(r_error)
     
 
 
@@ -162,29 +155,44 @@ def navigate_gate():
     msg = Twist()
     msg.linear.x = point_lateral_gain*nav_cmd_x_veh
     msg.linear.y = point_lateral_gain*nav_cmd_y_veh
+    msg.linear.x = 0.0
+    msg.linear.y = 0.0
     msg.linear.z = cr.limit_value(sum(nav_cmd_z), nav_limit_z)
     msg.angular.z = cr.limit_value(sum(nav_cmd_r), nav_limit_r)
 
-
-
     log_array = Float32MultiArray()
+    
 
-    log_array.data = [x_pos_error,
+
+
+
+
+    log_array.data = [diff_global[0],
+        diff_global[1],
         x_pos_proj,
+        y_pos_proj,
+        dist,
+        d_theta,
+        diff_global_proj[0],
+        diff_global_proj[1],
+        d_theta_proj,
+        lat_error_proj,
+        nrm_error_proj,
+        desired_norm_pos,
+        lat_vel_des_proj,
+        nrm_vel_des_proj,
         x_vel_des_proj,
+        y_vel_des_proj,
         global_vel[0],
+        global_vel[1],
         x_vel_error,
+        y_vel_error,
         x_accel_time,
         x_accel_des,
         x_theta_des,
         nav_cmd_x,
         nav_cmd_x_lim,
         msg.linear.x,
-        y_pos_error,
-        y_pos_proj,
-        y_vel_des_proj,
-        global_vel[1],
-        y_vel_error,
         y_accel_time,
         y_accel_des,
         y_theta_des,
@@ -197,8 +205,9 @@ def navigate_gate():
         nav_cmd_z[2],
         sum(nav_cmd_z),
         msg.linear.z,
-        pos_theta,
-        angle,
+        theta_gate,
+        theta_pos,
+        hdg,
         r_error,
         nav_cmd_r[0],
         nav_cmd_r[1],
@@ -402,7 +411,7 @@ def calculate_distance():
         heading_difference = heading_to_gate - heading_of_gate
         return flat_distance * math.cos(heading_difference)
 
- 
+
 
 def callback_states_changed(data, args):
     # update states, either autonomy state or bebop state
@@ -420,7 +429,7 @@ def callback_states_changed(data, args):
         rospy.loginfo("autonomy active changed to " + str(autonomy_active))
 
 
-# figuring this out
+
 def callback_visual_gate_detection_changed(data):
     
     # gate_position, gate_hdg = cr.WP2array(data)
@@ -431,11 +440,12 @@ def callback_visual_gate_detection_changed(data):
     global current_gate
     global gate_last_meas_time
     global gate_detected
+    global gate_log
 
     if len(data.format) == 0:
         pass
 
-    else:    
+    elif data.format != 'no gate':    
         global current_gate
         if current_gate is not None:
 
@@ -452,18 +462,26 @@ def callback_visual_gate_detection_changed(data):
         else:
             rospy.loginfo('Error: current_gate not initialized correctly')
     
+    
 
-
-    if data.pos.x != 0 and data.pos.y != 0:
+    if data.format == 'no gate':
+        gate_detected = False
+    else:
         gate_detected = True
         gate_last_meas_time = time.time()
-    else:
-        gate_detected = False
 
 
     if nav_active == 'through' and gate_detected:
-            rospy.loginfo('Updating pose from gate: '+str(math.hypot(data.pos.x,data.pos.y))+', '+str(data.pos.z)+', '+str(data.hdg)+', '+str(data.format))
-            bebop_model.update_pose_gate(data,current_gate)
+        rospy.loginfo('Updating pose from gate: '+str(math.hypot(data.pos.x,data.pos.y))+', '+str(data.pos.z)+', '+str(data.hdg)+', '+str(data.format))
+        
+        meas_vec = np.array([data.pos.x, data.pos.y, data.pos.z])
+        gate_pos = current_gate.pos.pos
+        R_body2track = tfs.rotation_matrix(bebop_model.att[2],(0,0,1))[0:3,0:3]
+        gate_proj = np.matmul(R_body2track, meas_vec)
+        pos_calc = gate_pos - gate_proj
+
+
+        gate_log.append(pos_calc)
 
     
 
@@ -482,7 +500,9 @@ def callback_bebop_odometry_changed(data):
     global bebop_odometry
     global bebop_last_known_pos
     global bebop_last_odom_time
-    global gate_last_meas_time
+    global gate_gain_comp_filter
+    global gate_log
+    global last_track_pos
 
     # Update body velocity
     bebop_model.update_body_vel(data.twist.twist.linear)
@@ -519,51 +539,55 @@ def callback_bebop_odometry_changed(data):
         bebop_model.update_odom(bebop_odom_transformed)
         
 
-
+    
 
 
     elif nav_active == 'through':
 
+        bebop_odom_transformed = bebop2track_transform_odom(data)
+        bebop_model.update_orientation(bebop_odom_transformed)
+
+
+        current_track_odom = bebop2track_transform_odom(data)
+        pos_c = current_track_odom.pose.pose.position        
+
         
-        bebop_model.update_orientation(data.pose.pose.orientation)
+        d_pos_bebop = np.array([pos_c.x, pos_c.y, pos_c.z]) - last_track_pos
 
 
-        if not gate_detected:
-            # update based on change from last odom reading
-            current_track_odom = bebop2track_transform_odom(data)
-            last_track_odom = bebop2track_transform_odom(bebop_odometry)
+        if len(gate_log) > 0:
 
-            pos_c = current_track_odom.pose.pose.position
-            pos_l = last_track_odom.pose.pose.position
-            quat_c = current_track_odom.pose.pose.orientation
-            quat_l = last_track_odom.pose.pose.orientation
+            np_log = np.array(gate_log)
+            x_avg = np.mean(np_log[:,0])
+            y_avg = np.mean(np_log[:,1])
+            z_avg = np.mean(np_log[:,2])
+            avg = [x_avg, y_avg, z_avg]
+        
+            d_pos_gate = avg - last_track_pos
 
-            dt_odom = time.time() - bebop_last_odom_time
-            dt_gate = time.time() - gate_last_meas_time
+            d_pos_filtered = (1 - gate_gain_comp_filter) * d_pos_bebop + gate_gain_comp_filter * d_pos_gate
+            
 
-            d_pos = np.array([pos_c.x, pos_c.y, pos_c.z]) - np.array([pos_l.x, pos_l.y, pos_l.z])
-            d_hdg = tfs.euler_from_quaternion([quat_c.x, quat_c.y, quat_c.z, quat_c.w])[2] - tfs.euler_from_quaternion([quat_l.x, quat_l.y, quat_l.z, quat_l.w])[2]
+            bebop_model.update_pose_gate(d_pos_filtered)
 
-
-            bebop_model.update_change_heading(d_pos,d_hdg)
-
+            track_last_known_pos = np.array(bebop_model.pos)
+            bebop_last_known_pos = np.array([temp_pos.x,temp_pos.y,temp_pos.z])
 
         else:
-            # Should be taken care of from gate detection callback
-            temp_pos = data.pose.pose.position
-            quat = data.pose.pose.orientation
-            track_last_known_pos = np.array([bebop_model.pos[0:1],0])
-            track_last_known_hdg = bebop_model.hdg
-            bebop_last_known_pos = np.array([temp_pos.x,temp_pos.y,temp_pos.z])
-            bebop_last_known_hdg = tfs.euler_from_quaternion([quat.x,quat.y,quat.z,quat.w])[2]
+            
+            bebop_model.update_pose_gate(d_pos_bebop)
 
 
 
+
+            
 
     # Send out bebops estimated position
     publisher_model.publish(bebop_model.get_drone_pose())
 
+    last_track_pos = bebop_model.pos
     bebop_odometry = data
+
     bebop_last_odom_time = time.time()
     
     
@@ -572,12 +596,15 @@ def update_last_known_bebop(odom):
     
     global bebop_last_known_hdg
     global bebop_last_known_pos
+    global track_last_known_pos
 
     pos = odom.pose.pose.position
     quat = odom.pose.pose.orientation
 
     bebop_last_known_pos = np.array([pos.x, pos.y, pos.z])
     bebop_last_known_hdg = tfs.euler_from_quaternion([quat.x, quat.y, quat.z, quat.w])[2]
+
+    track_last_known_pos[2] = pos.z
 
 
 
@@ -831,10 +858,10 @@ if __name__ == '__main__':
     # Variables
     autonomy_active = False                                     # autonomous mode is active
     
-    # start_pos = np.array([-.7, 9, 0])
-    # start_hdg = -np.pi/2
-    start_pos = np.array([0.0, 0.0, 0.0])
-    start_hdg = 0.0
+    start_pos = np.array([-.7, 5, 0])
+    start_hdg = -np.pi/2
+    # start_pos = np.array([0.0, 0.0, 0.0])
+    # start_hdg = 0.0
 
     
 
@@ -852,22 +879,23 @@ if __name__ == '__main__':
     loop_rate = 20                                              # frequency model and controller are run at
 
     current_gate = None
-    gate_filtered = None                                        # Filtered gate input from gate detection
+    gate_log = None                                             # Filtered gate input from gate detection
+    gate_detected = False
+    gate_gain_comp_filter = .1                                  # input of the gate to the complementary filter
+    last_pos = None
 
     bebop_last_odom_time = None                                 # Time log of the last bebop_odom data
     gate_last_meas_time = None                                  # Time log of the last gate data
     
     
     detection_active = False                                    # gate detection active boolean
-    gate_detected = False
     nav_active = "off"                                          # activated navigation algorithm
     
     
- 
     # PID Controller Classes
     nav_PID_z = cr.PID(1.0, 0, 0.0)
-    nav_PID_r = cr.PID(1.0, 0, 1.0)
-        
+    nav_PID_r = cr.PID(1.0, 0, 0.1)
+
 
 
     # Controller Params
@@ -1020,14 +1048,14 @@ if __name__ == '__main__':
     publisher_state_auto.publish(0)
 
     
-    # while bebop_odometry is None:
-    #     time.sleep(.5)
+    while bebop_odometry is None:
+        time.sleep(.5)
     
-    # update_last_known_bebop(bebop_odometry)
+    update_last_known_bebop(bebop_odometry)
 
-    # rospy.loginfo("Waiting for autonomy")
-    # while not autonomy_active:
-    #     time.sleep(.25)
+    rospy.loginfo("Waiting for autonomy")
+    while not autonomy_active:
+        time.sleep(.25)
     
 
     
@@ -1046,7 +1074,7 @@ if __name__ == '__main__':
     while not rospy.is_shutdown():
 		rospy.loginfo('Controller Loop')
 		update_pose_estimate()
-		# update_controller()
+		update_controller()
 		rate.sleep()
         
 

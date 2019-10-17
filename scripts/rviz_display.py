@@ -95,7 +95,7 @@ class bebop_data:
             self.tbr.sendTransform((0.7, 10.0, 1.7),(quat2[0],quat2[1],quat2[2],quat2[3]),rospy.Time.now(),'gate_frame21', "track_frame")
             self.tbr.sendTransform((2.1, 10.0, 1.7),(quat2[0],quat2[1],quat2[2],quat2[3]),rospy.Time.now(),'gate_frame22', "track_frame")
             self.arena_pub.publish(marker_array)
-            # print 'published arena'
+            print 'published arena'
             arena_rate.sleep()
 
 
@@ -334,7 +334,7 @@ class bebop_data:
             self.tbr.sendTransform((pos.x,pos.y,pos.z),(quat.x,quat.y,quat.z,quat.w),rospy.get_rostime(),'vehicle_frame', "track_frame")
 
             self.vichile_pub.publish(marker_array)
-            print 'sending position'            
+            # print 'sending position'            
             
 
         elif args == "odom":
