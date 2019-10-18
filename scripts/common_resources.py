@@ -327,10 +327,10 @@ class Gate:
 class Bebop_Model:
 	def __init__(self,pos,hdg):
 		self.pos = np.array(pos) # global position
-		self.vel = np.array([0,0,0]) # global velocity
-		self.att = np.array([0,0,0]) # roll pitch yaw, FRD
-		self.cmd_att = np.array([0,0,0,0]) # roll pitch yaw, FRD
-		self.body_vel = np.array([0,0,0])
+		self.vel = np.array([0.0,0.0,0.0]) # global velocity
+		self.att = np.array([0.0,0.0,0.0]) # roll pitch yaw, FRD
+		self.cmd_att = np.array([0.0,0.0,0.0,0.0]) # roll pitch yaw, FRD
+		self.body_vel = np.array([0.0,0.0,0.0])
 
 		self.max_tilt = 40*math.pi/180
 		self.roll_rate = 1.5*math.pi
@@ -412,40 +412,24 @@ class Bebop_Model:
 	
 
 	# Update based on relative gate location
-	def update_pose_gate(self,data,gate):
+	def update_pose_gate(self,d_pos):
 		meas_vec = np.array([data.pos.x, data.pos.y, data.pos.z])
-		meas_hdg = data.hdg
+		meas_hdg = data.hdg * 1.0
 
-		gate_hdg = gate.hdg
+		# gate_hdg = gate.hdg
 		gate_pos = gate.pos
 
-
-		R_gate = tfs.rotation_matrix(meas_hdg,(0,0,1))[0:2][0:2]
-		print R_gate
-		print -meas_vec
-		print gate_pos
-
-		pos_new = gate_pos + np.matmul(R_gate,-meas_vec)
-
-		theta_new = gate_hdg - meas_hdg
-		R_body2track = tfs.rotation_matrix(theta_new,(0,0,1))[0:2][0:2]
+		R_body2track = tfs.rotation_matrix(self.att[2],(0,0,1))[0:3,0:3]
+		
+		
+		gate_proj = np.matmul(R_body2track, meas_vec)
+		pos_new = gate_pos.pos - gate_proj
+		
 		self.vel = np.matmul(R_body2track,self.body_vel)
+		
 
 		self.pos = pos_new
-		self.att[2] = theta_new
-
-		self.update_pose()
-
-
-	# Update based on change to pos/hdg in track frame
-	def update_change_heading(self,d_pos,d_hdg):
-
-		self.pos = self.pos + d_pos
-		self.att[2] = wrap2pi(self.hdg + d_hdg)
-
-		R_body2track = tfs.rotation_matrix(self.att[2],(0,0,1))[0:2][0:2]
-		self.vel = np.matmul(R_body2track,self.body_vel)
-
+		
 		self.update_pose()
 
 
@@ -467,10 +451,19 @@ class Bebop_Model:
 		self.body_vel[2] = vel.z
 
 
-	def update_orientation(self,quat):
+	def update_orientation(self,odom):
+		
+		quat = odom.pose.pose.orientation
 		att_temp = tfs.euler_from_quaternion([quat.x, quat.y, quat.z, quat.w])
-		self.att[0] = att_temp[0]
-		self.att[1] = att_temp[1]
+		self.att = np.array(att_temp)
+
+		temp_vel = odom.twist.twist.linear
+		odom_vel = np.array([temp_vel.x, temp_vel.y, temp_vel.z])
+		self.body_vel = odom_vel
+
+		R_body2track = tfs.rotation_matrix(self.att[2],(0,0,1))[0:3,0:3]
+		self.vel = np.matmul(R_body2track,odom_vel)
+
 
 
 
