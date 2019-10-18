@@ -74,8 +74,8 @@ drone_angular_vel = np.zeros(3)
 
 ##########################  Filters   ##################################
 # MVA filters
-orientationFilter = MVA(20)
-translationFilter = MVA(20)
+orientationFilter = MVA(5)
+translationFilter = MVA(5)
 
 # Loop Frequency (important for kalman filtering)
 LOOP_FREQ = 60
@@ -84,16 +84,40 @@ LOOP_FREQ = 60
 PROCESS_NOISE = 0.01	# Variance of process noise
 SENSOR_NOISE = 0.1		# Variance of sensor noise
 
-def gatePoseDynamics(X,U,dt=1,noise=False):
+#def gatePoseDynamics(X,U,dt=1):
+  #v = U[:3].reshape(1,3)
+  #w = U[3:].reshape(1,3)
+  #x = X[:3].reshape(1,3)
+  #theta = X[3:].reshape(1,3)
+  #x = x + ( -v + np.cross(w,x) ) * dt
+  #theta = theta - w * dt 
+  #X = np.append(x,theta,axis=0).reshape(6,1) 
+  #return X
+
+#def jacobianA(X,U):
+  #return np.array([[0,-U[5],U[4],0,0,0],
+          #[U[5],0,-U[3],0,0,0],
+          #[-U[4],U[3],0,0,0,0],
+          #[0,0,0,0,0,0],
+          #[0,0,0,0,0,0],
+          #[0,0,0,0,0,0]])
+
+#def jacobianB(X,U):
+  #return np.array([[-1,0,0,0,X[2],-X[1]],
+                    #[0,-1,0,X[2],0,X[0]],
+                    #[0,0,-1,X[1],-X[0],0],
+                    #[0,0,0,-1,0,0],
+                    #[0,0,0,0,-1,0],
+                    #[0,0,0,0,0,-1]] )
+                    
+def gatePoseDynamics(X,U,dt=1):
   v = U[:3].reshape(1,3)
   w = U[3:].reshape(1,3)
   x = X[:3].reshape(1,3)
-  theta = X[3:].reshape(1,3)
+  theta = X[3:].reshape(1,1)
   x = x + ( -v + np.cross(w,x) ) * dt
   theta = theta - w * dt 
   X = np.append(x,theta,axis=0).reshape(6,1) 
-  if noise:
-    X = X + np.random.randn(X.shape[0], 1)*0.1
   return X
 
 def jacobianA(X,U):
