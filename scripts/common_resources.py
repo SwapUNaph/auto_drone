@@ -290,7 +290,7 @@ class Gate:
 		self.format = gate_format
 		self.current_gate = None
 
-		self.look_pos = WP(self.pos.pos - 5.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
+		self.look_pos = self.pos
 		self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
 
 

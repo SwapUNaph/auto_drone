@@ -20,6 +20,7 @@ from auto_drone.msg import WP_Msg, Drone_Pose, Detection_Active
 from tf import transformations as tfs
 import common_resources as cr
 
+last_track_pos
 
 def signal_handler(_, __):
     # enable Ctrl+C of the script
@@ -481,7 +482,7 @@ def callback_visual_gate_detection_changed(data):
         pos_calc = gate_pos - gate_proj
 
 	# gate_pos_wrt_ground = drone_pos_wrt_gorund + drone_orientation_matrix.inverse() * gate_pos_wrt_drone
-        gate_log.append(pos_calc)
+        #gate_log.append(pos_calc)
 
     
 
@@ -967,7 +968,7 @@ if __name__ == '__main__':
     turn_pos_1 = cr.WP(np.array([2.0, -1.25, 1.7]),None)
     turn_pos_2 = cr.WP(np.array([-1.5, 11.25, 1.7]),None)
     
-    gate_1 = cr.Gate(v,np.array([-0.7, 0.0, 1.7]),-np.pi/2)
+    gate_1 = cr.Gate(v,np.array([-0.5, 0.0, 1.7]),-np.pi/2)
     gate_2 = cr.Gate(h,np.array([1.4, 10.0, 1.7]),np.pi/2)
     
 
@@ -998,7 +999,7 @@ if __name__ == '__main__':
 
 
 
-    states[8]  = State( 8, 90, "time",  1000.0,            0, 0, 0, t, gate_params1,   gate_1.look_pos,        gate_1.pos,        gate_1)                   # testing 
+    states[8]  = State( 8, 90, "time",  1000.0,            0, 0, 0, t, gate_params1,   start_wp,        gate_1.look_pos,        gate_1)                   # testing 
 
     # states[10] = State(10, 11, "dist",  0.3,               0, 0, 0, p, None,           gate_1.look_pos,        loop_temp_wp,         None)                   # testing 
     # states[11] = State(11, 10, "dist",  0.3,               0, 0, 0, p, None,           start_pos_wp,           loop_temp_wp,         None)                   # testing 
