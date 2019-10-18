@@ -656,7 +656,6 @@ def bebop2track_transform_odom(bebop_odom):
 def update_pose_estimate():
     #global nav_active
     #global bebop_model
-    
     rospy.loginfo("Updating and sending Pose")
     
     # if nav_active == 'point' or  nav_active == 'off':
