@@ -71,6 +71,8 @@ drone_orientation = np.zeros(3, float)
 drone_linear_vel = np.zeros(3, float)
 drone_angular_vel = np.zeros(3, float)
 
+BATTERY_THRESH = 20 # Battery threshold for stopping
+
 ########################################################################
 
 ##########################  Filters   ##################################
@@ -347,9 +349,9 @@ def drone_odometry_callback(corrected_drone_odom):
     drone_linear_vel, drone_angular_vel = twist2array(corrected_drone_odom.twist.twist)
 
 def battery_callback(battery_msg):
-    if battery_msg.percent < 20:
+    if battery_msg.percent < BATTERY_THRESH:
         land_publisher.publish(Empty())
-        rospy.logerr("Drone Battery < 20 %.")
+        rospy.logerr("Drone Battery < {} %.".format(BATTERY_THRESH))
 
 
 
@@ -383,7 +385,6 @@ if __name__ == '__main__':
     # Update rate for the control loop
     rate = rospy.Rate(LOOP_FREQ) # LOOP_FREQ hz
 
-    start = time()
     gate_type_string = "no_gate"
     
     while not rospy.is_shutdown():
@@ -395,8 +396,7 @@ if __name__ == '__main__':
             # For Zed Stereo
             #img = img[:,:int(FRAME_WIDTH/2)]
             
-            # Gate detection
-            
+            # Gate detection           
             gate = detect_gate(img, hsv_thresh_low, hsv_thresh_high)
             
             # If gate detected succesfully
@@ -405,18 +405,17 @@ if __name__ == '__main__':
                 annotateCorners(gate, img)  
                 raw_euler, raw_tvec = getGatePose(gate, GATE_SIZE)
                 
-                if raw_euler[2] > np.pi or (np.linalg.norm(raw_tvec) > 30):
+                if raw_euler[2] > np.pi or (np.linalg.norm(raw_tvec) > 30): # Outlier rejection
                     gate_type_string = "no_gate"
                 else:
-                    gate_type_string = "gate"
-                    
+                    gate_type_string = "gate"                   
             else:
                 gate_type_string = "no_gate"
                 
             if gate_type_string == "no_gate":
                 raw_euler = np.zeros(3, float)
                 raw_tvec = np.zeros(3, float)
-                KF.C = np.zeros(KF.C.shape, float) # No measurements, rely only on prediction
+                KF.C = np.zeros(KF.C.shape, float) 	# No measurements, rely only on prediction
             else:  
                 KF.C = np.eye(KF.C.shape[0], dtype='float') # Use measurements to fuse with predictions
                 
@@ -427,9 +426,8 @@ if __name__ == '__main__':
             mva_tvec = translationFilter.update(raw_tvec)
             
             Y = mva_tvec.reshape((3,1))
-            U = drone_linear_vel.reshape((3,1))
+            U = np.matmul( tfs.rotation_matrix(gateHeading, (0,0,1))[:3,:3], drone_linear_vel.reshape((3,1)) )
             KF.dt = (time() - start)
-            KF.B = -tfs.rotation_matrix(gateHeading, (0,0,1))[:3,:3]
             KF.filter(U,Y)
             X = KF.X.copy()
 
@@ -437,10 +435,9 @@ if __name__ == '__main__':
             gate_WP = array2WP(raw_tvec, raw_euler[2], "")
             gate_pose_pub.publish(gate_WP)
             filtered_gate_pose_pub.publish(filtered_gate_WP) 
-            
+
             rospy.loginfo("LOOP Frequency: {} Hz".format(1/(time() - start)))
             #img = cv2.resize(img, None, fx=0.25, fy=0.25)   
             image_publisher.publish(bridge.cv2_to_imgmsg(img,"bgr8"))
-         
-        #rate.sleep()
+
             
