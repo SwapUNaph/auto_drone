@@ -20,7 +20,6 @@ from auto_drone.msg import WP_Msg, Drone_Pose, Detection_Active
 from tf import transformations as tfs
 import common_resources as cr
 
-last_track_pos
 
 def signal_handler(_, __):
     # enable Ctrl+C of the script

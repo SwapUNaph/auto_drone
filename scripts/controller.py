@@ -15,7 +15,7 @@ import signal
 import sys
 from std_msgs.msg import String
 from geometry_msgs.msg import Twist, Pose
-from auto_drone.msg import Traj_error
+from auto_drone.msg import WP_Msg
 from common_resources import *
 import numpy as np
 
@@ -36,42 +36,38 @@ def signal_handler(_, __):
 	
 	
 # Cypress 7/25/19
-#PID_x = PID(p=0.1, i=0.0, d=0.5, output_limit = (-2,2))
-#PID_y = PID(p=0.1, i=0.0, d=0.5, output_limit = (-2,2))
-#PID_z = PID(p=0.3, i=0.0, d=0.5, output_limit = (-2,2))
-#PID_yaw = PID(p=0.5, i=0.0, d=0.2, output_limit = (-2,2))
+PID_x = PID(p=0.1, i=0.01, d=0.5)
+PID_y = PID(p=0.1, i=0.01, d=0.5)
+PID_z = PID(p=0.3, i=0.0, d=0.5)
+PID_yaw = PID(p=0.5, i=0.0, d=0.2)
 #PID_roll = PID(p=0.5, i=0.0, d=0.2, output_limit = (-0.5,0.5))
 #PID_pitch = PID(p=0.5, i=0.0, d=0.2, output_limit = (-0.5,0.5))
 
 # Simulation PID
-PID_x = PID(p=1, i=0.0, d=5, output_limit = (-5,5))
-PID_y = PID(p=1, i=0.0, d=5, output_limit = (-5,5))
-PID_z = PID(p=1, i=0.0, d=5, output_limit = (-5,5))
-PID_yaw = PID(p=2, i=0.0, d=0.2, output_limit = (-2,2))
-PID_roll = PID(p=2, i=0.0, d=0.2, output_limit = (-0.5,0.5))
-PID_pitch = PID(p=2, i=0.0, d=0.2, output_limit = (-0.5,0.5))
+#PID_x = PID(p=1, i=0.0, d=5)
+#PID_y = PID(p=1, i=0.0, d=5)
+#PID_z = PID(p=1, i=0.0, d=5)
+#PID_yaw = PID(p=2, i=0.0, d=0.2)
+#PID_roll = PID(p=2, i=0.0, d=0.2)
+#PID_pitch = PID(p=2, i=0.0, d=0.2)
 
 
-def traj_error_callback(traj_error):
-	global PID_x, PID_y, PID_z, PID_roll, PID_pitch, PID_yaw 
+def WP_error_callback(WP_error):
+	global PID_x, PID_y, PID_z, PID_yaw
 	
-	pose_error = traj_error.pose_error
-	twist_error = traj_error.twist_error
+	pos_error, hdg_error, fmt = WP2array(WP_error)
 	
 	control_input = Twist()
 	
 	if PID_CONTROL:
-		# Calculate control input from pose error
-		position_error, orientation_error = pose2array(pose_error)
-		linear_vel_error, angular_vel_error = twist2array(twist_error)
-		euler_errors =  quat2euler(orientation_error)	
-		control_input.linear.x = PID_x.update(position_error[0]) + linear_vel_error[0]
-		control_input.linear.y = PID_y.update(position_error[1]) + linear_vel_error[1]
-		control_input.linear.z = PID_z.update(position_error[2]) + linear_vel_error[2]
-		control_input.angular.x = PID_roll.update(euler_errors[0]) #+ angular_vel_error[0]
-		control_input.angular.y = PID_pitch.update(euler_errors[1]) #+ angular_vel_error[1]
-		control_input.angular.z = PID_yaw.update(euler_errors[2]) #+ angular_vel_error[2]
+		# Calculate control input from pose error	
+		control_input.linear.x = np.sum(PID_x.update(pos_error[0]))
+		control_input.linear.y = np.sum(PID_y.update(pos_error[1]))
+		control_input.linear.z = np.sum(PID_z.update(pos_error[2]))
+		control_input.angular.z = np.sum(PID_yaw.update(hdg_error))
 		commander.publish(control_input)
+		
+	'''
 	else:
 		position_error, orientation_error = pose2array(pose_error)
 		euler_errors =  quat2euler(orientation_error)	
@@ -93,7 +89,7 @@ def traj_error_callback(traj_error):
 		control_input.angular.y = control_input_angular[1]
 		control_input.angular.z = control_input_angular[2]
 		commander.publish(control_input)
-		
+	'''
 	
 if __name__ == '__main__':
 	
@@ -101,7 +97,7 @@ if __name__ == '__main__':
 	
 	
 	# Set simulation parameter to True. The system will start in simulation mode by default.
-	SIMULATION = rospy.get_param("/simulation")
+	#SIMULATION = rospy.get_param("/simulation")
 
 	
 	# Initialize node
@@ -115,14 +111,11 @@ if __name__ == '__main__':
 	#rospy.Subscriber('/drone_pose', Pose, drone_pose_callback)
 	
 	# Trajectory error subscription
-	rospy.Subscriber('/traj_error', Traj_error, traj_error_callback)
+	rospy.Subscriber('/auto/WP_error', WP_Msg, WP_error_callback)
 	
 	# Publishers
 	# cmd_vel publication
-	if SIMULATION:
-		commander = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
-	else:
-		commander = rospy.Publisher('/bebop/cmd_vel', Twist, queue_size=1)
+	commander = rospy.Publisher('/bebop/cmd_vel', Twist, queue_size=1)
 	
 	# Update rate for the control loop
 	rate = rospy.Rate(50) # 50 hz
