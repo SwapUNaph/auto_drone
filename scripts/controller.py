@@ -13,7 +13,7 @@ Change log:
 import rospy
 import signal
 import sys
-from std_msgs.msg import String
+from std_msgs.msg import String, Bool
 from geometry_msgs.msg import Twist, Pose
 from auto_drone.msg import WP_Msg
 from common_resources import *
@@ -21,6 +21,7 @@ import numpy as np
 
 # Make the flag true if want to use PID controller
 PID_CONTROL = True
+AUTONOMY_ACTIVE = False
 
 def signal_handler(_, __):
     # enable Ctrl+C of the script
@@ -36,10 +37,10 @@ def signal_handler(_, __):
 	
 	
 # Cypress 7/25/19
-PID_x = PID(p=0.1, i=0.01, d=0.5)
-PID_y = PID(p=0.1, i=0.01, d=0.5)
+PID_x = PID(p=0.1, i=0.05, d=0.05)
+PID_y = PID(p=0.1, i=0.05, d=0.05)
 PID_z = PID(p=0.3, i=0.0, d=0.5)
-PID_yaw = PID(p=0.5, i=0.0, d=0.2)
+PID_yaw = PID(p=0.3, i=0.0, d=0.1)
 #PID_roll = PID(p=0.5, i=0.0, d=0.2, output_limit = (-0.5,0.5))
 #PID_pitch = PID(p=0.5, i=0.0, d=0.2, output_limit = (-0.5,0.5))
 
@@ -51,46 +52,56 @@ PID_yaw = PID(p=0.5, i=0.0, d=0.2)
 #PID_roll = PID(p=2, i=0.0, d=0.2)
 #PID_pitch = PID(p=2, i=0.0, d=0.2)
 
+def autonomy_active_callback(autonomy):
+	global AUTONOMY_ACTIVE
+	AUTONOMY_ACTIVE = autonomy.data
+	
 
 def WP_error_callback(WP_error):
-	global PID_x, PID_y, PID_z, PID_yaw
+	global PID_x, PID_y, PID_z, PID_yaw, PID_CONTROL, AUTONOMY_ACTIVE
 	
 	pos_error, hdg_error, fmt = WP2array(WP_error)
 	
 	control_input = Twist()
 	
-	if PID_CONTROL:
-		# Calculate control input from pose error	
-		control_input.linear.x = np.sum(PID_x.update(pos_error[0]))
-		control_input.linear.y = np.sum(PID_y.update(pos_error[1]))
-		control_input.linear.z = np.sum(PID_z.update(pos_error[2]))
-		control_input.angular.z = np.sum(PID_yaw.update(hdg_error))
-		commander.publish(control_input)
-		
-	'''
-	else:
-		position_error, orientation_error = pose2array(pose_error)
-		euler_errors =  quat2euler(orientation_error)	
-		linear_vel_error, angular_vel_error = twist2array(twist_error)
+	if AUTONOMY_ACTIVE:
+		if PID_CONTROL:
+			# Calculate control input from pose error	
+			control_input.linear.x = np.sum(PID_x.update(pos_error[0]))
+			control_input.linear.y = np.sum(PID_y.update(pos_error[1]))
+			control_input.linear.z = np.sum(PID_z.update(pos_error[2]))
+			control_input.angular.z = np.sum(PID_yaw.update(hdg_error))
+			commander.publish(control_input)
 			
-		Kp_position = np.array([1, 1, 1])
-		Kd_position = np.array([2, 2, 2])
-		
-		Kp_attitude = np.array([1, 1, 1])
-		Kd_attitude = np.array([0.1, 0.1, 0.1])
-		
-		control_input_linear = np.multiply(Kp_position, position_error) + np.multiply(Kd_position, linear_vel_error)	 
-		control_input_angular = np.multiply(Kp_attitude, euler_errors) + np.multiply(Kd_attitude, angular_vel_error)
-		
-		control_input.linear.x = control_input_linear[0]
-		control_input.linear.y = control_input_linear[1]
-		control_input.linear.z = control_input_linear[2]
-		control_input.angular.x = control_input_angular[0]
-		control_input.angular.y = control_input_angular[1]
-		control_input.angular.z = control_input_angular[2]
-		commander.publish(control_input)
-	'''
+		'''
+		else:
+			position_error, orientation_error = pose2array(pose_error)
+			euler_errors =  quat2euler(orientation_error)	
+			linear_vel_error, angular_vel_error = twist2array(twist_error)
+				
+			Kp_position = np.array([1, 1, 1])
+			Kd_position = np.array([2, 2, 2])
+			
+			Kp_attitude = np.array([1, 1, 1])
+			Kd_attitude = np.array([0.1, 0.1, 0.1])
+			
+			control_input_linear = np.multiply(Kp_position, position_error) + np.multiply(Kd_position, linear_vel_error)	 
+			control_input_angular = np.multiply(Kp_attitude, euler_errors) + np.multiply(Kd_attitude, angular_vel_error)
+			
+			control_input.linear.x = control_input_linear[0]
+			control_input.linear.y = control_input_linear[1]
+			control_input.linear.z = control_input_linear[2]
+			control_input.angular.x = control_input_angular[0]
+			control_input.angular.y = control_input_angular[1]
+			control_input.angular.z = control_input_angular[2]
+			commander.publish(control_input)
+		'''
+	else:
+		pass
 	
+
+
+
 if __name__ == '__main__':
 	
 	signal.signal(signal.SIGINT, signal_handler)
@@ -112,6 +123,7 @@ if __name__ == '__main__':
 	
 	# Trajectory error subscription
 	rospy.Subscriber('/auto/WP_error', WP_Msg, WP_error_callback)
+	rospy.Subscriber("/auto/autonomy_active",  Bool, autonomy_active_callback)
 	
 	# Publishers
 	# cmd_vel publication

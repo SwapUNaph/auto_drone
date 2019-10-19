@@ -274,18 +274,15 @@ class STDEV:
 	def __init__(self, window):
 		self.window = window
 		self.val_history = []
-		self.stdev = 1e6
+		self.stdev = 100
 	
 	def get_stdev(self, val):
-		if 5 < len(self.val_history) < self.window:
-			self.val_history.append(val)
-		elif len(self.val_history) >= self.window:
-			self.val_history.pop(0)
+		if len(self.val_history) < self.window:
 			self.val_history.append(val)
 		else:
-			pass
-				
-		self.stdev = np.std(self.val_history, axis=0)
+			self.val_history.pop(0)
+			self.val_history.append(val)
+			self.stdev = np.std(self.val_history, axis=0)
 		return self.stdev
 
 # waypoint class with position and hdg as well as a string function
