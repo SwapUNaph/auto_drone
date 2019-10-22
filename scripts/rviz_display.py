@@ -24,6 +24,7 @@ import math
 import signal
 import sys
 import tf
+import os 
 
 def signal_handler(signal, frame):
     sys.exit(0)
@@ -41,6 +42,7 @@ class bebop_data:
         self.state_level = 0
 
         self.battery_level = 0
+        self.playing_audio = False
         self.gate_size = 1.4
 
         self.display_bebop_odom = False
@@ -71,6 +73,8 @@ class bebop_data:
         rospy.Subscriber("/auto/state_auto", Int32, self.callback,'state')
         rospy.Subscriber("/auto/pose", Drone_Pose, self.callback,'vehicle_pos')
         
+        rospy.Subscriber("/auto/filtered_gate_WP", WP_Msg, self.callback,'gate_filtered')
+
         self.publish_arena()  
 
 
@@ -203,6 +207,9 @@ class bebop_data:
                 self.gate_number = self.gate_number+1
                 self.state_level = data.data
 
+
+        elif args == 'gate_filtered':
+            pass
 
         elif args == 'vehicle_pos':
 
@@ -455,6 +462,13 @@ class bebop_data:
         elif args == "battery":
 
             self.battery_level = data.percent
+            if data.percent < 10 and not self.playing_audio:
+                self.playing_audio = True
+                while True:
+                    os.system('spd-say "Battery Getting low"')
+                    time.sleep(4)
+
+
 
         elif args == "wifi":
             if data.rssi * 2 + 160 < 100.0:
