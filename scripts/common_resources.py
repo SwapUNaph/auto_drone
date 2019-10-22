@@ -201,12 +201,17 @@ class KalmanFilter:
 	self.R = R
 	self.P = Q
 	self.X = X0
+	self.X_dot = np.zeros(X0.shape, float)
 	self.dt = dt
 	
-  def predict(self, U):   
-	self.X = self.X + ( np.dot(self.A, self.X) + np.dot(self.B, U) ) * self.dt
+  def predict(self, U):
+	current_X_dot = ( np.dot(self.A, self.X) + np.dot(self.B, U) )
+	self.X = self.X + (current_X_dot + self.X_dot) / 2 * self.dt
+	self.X_dot = current_X_dot
+	
 	F = np.eye(self.A.shape[0]) + self.A
 	self.P = np.dot(F, np.dot(self.P, F.T)) + self.Q
+	
 	
   def update(self, Y):
 	S = np.float32 (np.dot(self.C, np.dot(self.P, self.C.T)) + self.R)
