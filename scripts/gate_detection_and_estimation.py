@@ -31,8 +31,8 @@ from tf import transformations as tfs
 ######################  Detection Parameters  ##########################
 
 # Gate size in meters
-GATE_SIZE = 1.20
-NOT_GATE_SIZE = 0.8
+GATE_SIZE = 1.43
+NOT_GATE_SIZE = 1.18
 
 
 # HSV thresholds for LED gate
@@ -51,7 +51,7 @@ SOLIDITY_THRESH = 0.90
 ROI_MEAN_THRESH = 100
 
 DETECTION_ACTIVE = True
-GATE_TYPE_VERTICAL = None
+GATE_TYPE_VERTICAL = True
 
 ########################################################################
 
@@ -59,9 +59,9 @@ GATE_TYPE_VERTICAL = None
 
 # Camera Capture
 cap = cv2.VideoCapture(0)
-cap.set(3, 640) # Width 2560x720
-cap.set(4, 480) # Height
-cap.set(5, 30) # FPS
+cap.set(3, 2560) # Width 2560x720
+cap.set(4, 720) # Height
+cap.set(5, 60) # FPS
 FRAME_WIDTH = cap.get(3)
 
 bridge = CvBridge()
@@ -80,10 +80,10 @@ BATTERY_THRESH = 20 # Battery threshold for stopping
 orientationFilter = MVA(20)
 translationFilter = MVA(5)
 headingBiasFilter= MVA(20)
-
+noGateTvecFilter = MVA(20)
 
 # Loop Frequency (important for kalman filtering)
-LOOP_FREQ = 30
+LOOP_FREQ = 60
 
 #Process Noise and Sensor noise
 PROCESS_NOISE = 0.01	# Variance of process noise
@@ -187,7 +187,7 @@ def contourROIMean(contour, img):
     x,y,w,h = cv2.boundingRect(contour)
     return img[y:y+h, x:x+w].mean()
 
-def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
+def detect_gate(img, hsv_thresh_low, hsv_thresh_high, areaIndex):
     '''
     Description: The function takes in an image and hsv threshold values, detects 
                 the largest 4-sided polygon and returns its corner coordinates.
@@ -260,7 +260,7 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     
     if len(quadrlFiltered) > 0:
         # Get the largest contour
-        gate_contour = quadrlFiltered[-1].reshape(4,2)
+        gate_contour = quadrlFiltered[areaIndex].reshape(4,2)
         
         # Sort the points starting with top left and going counter-clockwise
         center = gate_contour.mean(axis=0)
@@ -306,17 +306,17 @@ def getGatePose(contour, gate_side):
     dRc = np.array([[0,0,1],[-1,0,0],[0,-1,0]])
 
     ############################  For CaliCam    ##################################
-    cameraMatrix = np.array([[ 223.47508211, 0.0, 348.03017129], [0.0, 225.41305757, 215.59249353], [0.0, 0.0, 1.0]] )
-    distCoeffs = np.array([-0.26163237,  0.05491025,  0.0056113,  -0.0013107,  -0.00456478])
+    #cameraMatrix = np.array([[ 223.47508211, 0.0, 348.03017129], [0.0, 225.41305757, 215.59249353], [0.0, 0.0, 1.0]] )
+    #distCoeffs = np.array([-0.26163237,  0.05491025,  0.0056113,  -0.0013107,  -0.00456478])
 
     ###############################################################################
 
     ####################################   For ZED stereo   #############################
     ## Camera Matrix 720p 
-    #cameraMatrix = np.array([[700, 0.0, 640], [0.0, 700, 360], [0.0, 0.0, 1.0]])
+    cameraMatrix = np.array([[700, 0.0, 640], [0.0, 700, 360], [0.0, 0.0, 1.0]])
 
     ### Distortion Coefficients 720p
-    #distCoeffs = np.array([-0.1740500032901764, 0.028304599225521088, 0.0, 0.0, 0.0])
+    distCoeffs = np.array([-0.1740500032901764, 0.028304599225521088, 0.0, 0.0, 0.0])
 
     # Camera Matrix VGA
     #cameraMatrix = np.array([[350, 0.0, 336], [0.0, 350, 188], [0.0, 0.0, 1.0]])
@@ -352,10 +352,33 @@ def battery_callback(battery_msg):
     if battery_msg.percent < BATTERY_THRESH:
         land_publisher.publish(Empty())
         rospy.logerr("Drone Battery < {} %.".format(BATTERY_THRESH))
+        
+def gate_detection_active_callback(det_active):
+	global DETECTION_ACTIVE, GATE_TYPE_VERTICAL
+	DETECTION_ACTIVE =  det_active.active
+	GATE_TYPE_VERTICAL = det_active.vertical
+
+def detect_gate_type(gate, not_gate, gate_detection_str):
+	global GATE_TYPE_VERTICAL
+	if gate_detection_str == "gate":
+		difference = gate - not_gate
+		if (np.linalg.norm(difference) - 1.4) <= 0.2: # Both gates are reliably detected
+			if not GATE_TYPE_VERTICAL: # gate is horizontal
+				if difference[1] > 0: # gate is left to no_gate
+					gate_detection_str = "left"
+				else:
+					gate_detection_str = "right"
+			else:
+				if difference[2] > 0: # gate is vertical
+					gate_detection_str = "up"
+				else:
+					gate_detection_str = "down"
 
 
 
 if __name__ == '__main__':
+	
+	global DETECTION_ACTIVE, GATE_TYPE_VERTICAL
 
     signal.signal(signal.SIGINT, signal_handler)
 
@@ -373,6 +396,7 @@ if __name__ == '__main__':
     #rospy.Subscriber('/auto/pose', Drone_Pose, drone_odometry_callback)
     rospy.Subscriber('/bebop/odom', Odometry, drone_odometry_callback)
     rospy.Subscriber('/bebop/states/common/CommonState/BatteryStateChanged', CommonCommonStateBatteryStateChanged, battery_callback)
+    rospy.Subscriber('/auto/gate_detection_active', Detection_Active, gate_detection_active_callback)
 
 
     # Publishers
@@ -385,57 +409,69 @@ if __name__ == '__main__':
     # Update rate for the control loop
     rate = rospy.Rate(LOOP_FREQ) # LOOP_FREQ hz
 
-    gate_type_string = "no_gate"
+    gate_detection_string = "no_gate"
+    start = time()
     
     while not rospy.is_shutdown():
-        start = time()
-        ret, img = cap.read()
-        if img is None:
-            rospy.logerr("No Camera detected!!!")
-        else:
-            # For Zed Stereo
-            #img = img[:,:int(FRAME_WIDTH/2)]
-            
-            # Gate detection           
-            gate = detect_gate(img, hsv_thresh_low, hsv_thresh_high)
-            
-            # If gate detected succesfully
-            if gate is not None and np.array_equal(gate.shape, [4,2]):
-                cv2.drawContours(img, [gate.reshape(4,2)], 0, (255, 0, 0), 2)
-                annotateCorners(gate, img)  
-                raw_euler, raw_tvec = getGatePose(gate, GATE_SIZE)
-                
-                if raw_euler[2] > np.pi or (np.linalg.norm(raw_tvec) > 30): # Outlier rejection
-                    gate_type_string = "no_gate"
-                else:
-                    gate_type_string = "gate"                   
-            else:
-                gate_type_string = "no_gate"
-                
-            if gate_type_string == "no_gate":
-                raw_euler = np.zeros(3, float)
-                raw_tvec = np.zeros(3, float)
-                KF.C = np.zeros(KF.C.shape, float) 	# No measurements, rely only on prediction
-            else:  
-                KF.C = np.eye(KF.C.shape[0], dtype='float') # Use measurements to fuse with predictions
-                
-            # Kalman Filtering
-            euler = orientationFilter.update(raw_euler)         
-            gateHeading = filterHeading(euler[2], drone_orientation[2])
-    
-            mva_tvec = translationFilter.update(raw_tvec)
-            
-            Y = mva_tvec.reshape((3,1))
-            U = np.matmul( tfs.rotation_matrix(gateHeading, (0,0,1))[:3,:3], drone_linear_vel.reshape((3,1)) )
-            KF.dt = (time() - start)
-            KF.filter(U,Y)
-            X = KF.X.copy()
-
-            filtered_gate_WP = array2WP(X, gateHeading, gate_type_string)
-            gate_WP = array2WP(raw_tvec, raw_euler[2], "")
-            gate_pose_pub.publish(gate_WP)
-            filtered_gate_pose_pub.publish(filtered_gate_WP) 
-
+        
+        if DETECTION_ACTIVE:
+			ret, img = cap.read()
+			if img is None:
+				rospy.logerr("No Camera detected!!!")
+			else:
+				# For Zed Stereo
+				img = img[:,:int(FRAME_WIDTH/2)]
+				
+				# Gate detection           
+				gate = detect_gate(img, hsv_thresh_low, hsv_thresh_high, -1)
+				not_gate = detect_gate(img, not_gate_hsv_thresh_low, not_gate_hsv_thresh_high, 0)
+				
+				# If gate detected succesfully
+				if gate is not None and np.array_equal(gate.shape, [4,2]):
+					cv2.drawContours(img, [gate.reshape(4,2)], 0, (255, 0, 0), 2)
+					annotateCorners(gate, img)  
+					raw_euler, raw_tvec = getGatePose(gate, GATE_SIZE)
+					raw_ng_euler, raw_ng_tvec = getGatePose(gate, GATE_SIZE)
+					ng_tvec = noGateTvecFilter.update(raw_ng_tvec)
+					
+					if raw_euler[2] > np.pi or (np.linalg.norm(raw_tvec) > 30): # Outlier rejection
+						gate_detection_string = "no_gate"
+					else:
+						gate_detection_string = "gate"                   
+				else:
+					gate_detection_string = "no_gate"
+					
+				if gate_detection_string == "no_gate":
+					raw_euler = np.zeros(3, float)
+					raw_tvec = np.zeros(3, float)
+					KF.C = np.zeros(KF.C.shape, float) 	# No measurements, rely only on prediction
+				else:  
+					KF.C = np.eye(KF.C.shape[0], dtype='float') # Use measurements to fuse with predictions
+					
+				# Kalman Filtering
+				euler = orientationFilter.update(raw_euler)         
+				gateHeading = filterHeading(euler[2], drone_orientation[2])
+		
+				mva_tvec = translationFilter.update(raw_tvec)
+				
+				Y = mva_tvec.reshape((3,1))
+				U = np.matmul( tfs.rotation_matrix(gateHeading, (0,0,1))[:3,:3], drone_linear_vel.reshape((3,1)) )
+				KF.dt = (time() - start)
+				start = time()
+				KF.filter(U,Y)
+				X = KF.X.copy()
+				
+				# Detect gate type
+				gate_type = detect_gate_type(X, ng_tvec, gate_detection_string)
+				
+				# Send messages
+				filtered_gate_WP = array2WP(X, gateHeading, gate_detection_string)
+				gate_WP = array2WP(raw_tvec, raw_euler[2], "")
+				gate_pose_pub.publish(gate_WP)
+				filtered_gate_pose_pub.publish(filtered_gate_WP) 
+				
+			else:
+				pass
             rospy.loginfo("LOOP Frequency: {} Hz".format(1/(time() - start)))
             #img = cv2.resize(img, None, fx=0.25, fy=0.25)   
             image_publisher.publish(bridge.cv2_to_imgmsg(img,"bgr8"))
