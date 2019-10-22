@@ -288,7 +288,7 @@ class Gate:
 		self.org_pos = WP(self.pos.pos,None)
 		self.hdg = hdg        
 		self.format = gate_format
-		self.current_gate = None
+		self.on_gate = None
 
 		self.look_pos = WP(self.pos.pos - 5.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
 		self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
@@ -296,7 +296,7 @@ class Gate:
 
 	def reset(self):
 		self.pos = self.org_pos
-		self.current_gate = None
+		self.on_gate = None
 		self.look_pos = WP(self.org_pos.pos - 5.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
 		self.exit_pos = WP(self.org_pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
 
@@ -304,25 +304,25 @@ class Gate:
 	def update_format(self,gate_format):
 
 		if self.format == 'vertical' and gate_format == 'top':
-			self.current_gate = gate_format
+			self.on_gate = gate_format
 			self.pos = self.org_pos + np.array([0,0,.7])
 			self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
 		
 
 		elif self.format == 'vertical' and gate_format == 'bottom':
-			self.current_gate = gate_format
+			self.on_gate = gate_format
 			self.pos = self.org_pos - np.array([0,0,.7])
 			self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
 
 
 		elif self.format == 'horizontal' and gate_format == 'left':
-			self.current_gate = gate_format
+			self.on_gate = gate_format
 			self.pos = self.org_pos + np.array([0.7,0.0,0.0])
 			self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
 
 
 		elif self.format == 'horizontal' and gate_format == 'right':
-			self.current_gate = gate_format
+			self.on_gate = gate_format
 			self.pos = self.org_pos - np.array([0.7,0.0,0.0])
 			self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
 	
@@ -407,7 +407,7 @@ class Bebop_Model:
 		
 		self.pose = odom.pose.pose
 
-
+	
 	# updates commanded attitude from commands
 	def update_att(self,commands):
 		self.cmd_att[0] = self.max_tilt*commands[0]
@@ -416,24 +416,10 @@ class Bebop_Model:
 		self.cmd_att[3] = commands[3]
 	
 
-	# Update based on relative gate location
+	# Update based on change in position after filtered gate location
 	def update_pose_gate(self,d_pos):
-		meas_vec = np.array([data.pos.x, data.pos.y, data.pos.z])
-		meas_hdg = data.hdg * 1.0
-
-		# gate_hdg = gate.hdg
-		gate_pos = gate.pos
-
-		R_body2track = tfs.rotation_matrix(self.att[2],(0,0,1))[0:3,0:3]
 		
-		
-		gate_proj = np.matmul(R_body2track, meas_vec)
-		pos_new = gate_pos.pos - gate_proj
-		
-		self.vel = np.matmul(R_body2track,self.body_vel)
-		
-
-		self.pos = pos_new
+		self.pos = self.pos + d_pos
 		
 		self.update_pose()
 
@@ -462,14 +448,15 @@ class Bebop_Model:
 		att_temp = tfs.euler_from_quaternion([quat.x, quat.y, quat.z, quat.w])
 		self.att = np.array(att_temp)
 
-		temp_vel = odom.twist.twist.linear
-		odom_vel = np.array([temp_vel.x, temp_vel.y, temp_vel.z])
-		self.body_vel = odom_vel
+		# temp_vel = odom.twist.twist.linear
+		# odom_vel = np.array([temp_vel.x, temp_vel.y, temp_vel.z])
+		# self.body_vel = odom_vel
 
 		R_body2track = tfs.rotation_matrix(self.att[2],(0,0,1))[0:3,0:3]
-		self.vel = np.matmul(R_body2track,odom_vel)
+		self.vel = np.matmul(R_body2track,self.body_vel)
 
-
+	def update_frame_change(self,d_pos):
+		self.pos = self.pos + d_pos
 
 
 

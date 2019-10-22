@@ -21,6 +21,10 @@ from tf import transformations as tfs
 import common_resources as cr
 
 
+
+
+
+
 def signal_handler(_, __):
     # enable Ctrl+C of the script
     sys.exit(0)
@@ -37,15 +41,16 @@ def navigate_gate():
 
 
     
-    rospy.loginfo("fly from")
-    rospy.loginfo([bebop_p[0], bebop_p[1], bebop_p[2], hdg])
-    rospy.loginfo("fly to")
-    rospy.loginfo(current_state.fly.pos)
+    # rospy.loginfo("fly from")
+    # rospy.loginfo([bebop_p[0], bebop_p[1], bebop_p[2], hdg])
+    # rospy.loginfo("fly to")
+    # rospy.loginfo(current_state.fly.pos)
     
 
 
     # global difference between WP ad position
     diff_global = current_state.fly.pos - bebop_p
+
     
     # X and Y components hypothenuse
     dist = math.hypot(diff_global[0], diff_global[1])
@@ -75,27 +80,48 @@ def navigate_gate():
 
     d_theta_proj = cr.wrap2pi(theta_gate - theta_pos_proj)
 
-    lat_error_proj = dist_proj * d_theta_proj
-    nrm_error_proj = dist_proj
+
+    
+    
+    gate_nav_hold_dist = 2
+    # gate_nav_theta_start = 20 * np.pi/180.0
+    gate_nav_theta_thr = 10 * np.pi/180.0
+    gate_nav_des_vel_lat = 1.5
+    gate_nav_des_vel_nrm = 1.0
+    
+    vel_slope_gate_nrm = 0.8
+    vel_slope_gate_lat = 1.5
 
     
 
-    if abs(d_theta) > gate_nav_theta_start:
+    if abs(d_theta_proj) > gate_nav_theta_thr:
         desired_norm_pos = gate_nav_hold_dist
-    elif abs(d_theta) > gate_nav_theta_thr:
-        desired_norm_pos = gate_nav_hold_dist * (d_theta - gate_nav_theta_thr)/(gate_nav_theta_start - gate_nav_theta_thr)
     else:
-        desired_norm_pos = 0.0
+        desired_norm_pos = 0.0  
 
-    desired_norm_pos = 2.0
 
-    lat_vel_des_proj = cr.limit_value( point_vel_slope * (lat_error_proj), gate_nav_des_vel_lat)
-    nrm_vel_des_proj = cr.limit_value( point_vel_slope * (desired_norm_pos - nrm_error_proj), gate_nav_des_vel_nrm)
+    # desired_norm_pos = gate_nav_hold_dist
 
+
+
+    lat_error_proj = dist_proj * d_theta_proj       
+    nrm_error_proj = desired_norm_pos - dist_proj
+
+
+    nrm_vel_des = cr.limit_value(vel_slope_gate_nrm * (nrm_error_proj), gate_nav_des_vel_nrm)
+
+    if dist_proj < gate_nav_hold_dist * 1.5 and abs(d_theta_proj) <= gate_nav_theta_thr:
+        nrm_vel_des = nrm_vel_des * (gate_nav_theta_thr - abs(d_theta_proj)) / gate_nav_theta_thr
+
+
+    lat_vel_des = cr.limit_value( vel_slope_gate_lat * (-lat_error_proj), gate_nav_des_vel_lat)
     
-    x_vel_des_proj = -lat_vel_des_proj * math.sin(theta_pos_proj) - nrm_vel_des_proj * math.cos(theta_pos_proj)
-    y_vel_des_proj = lat_vel_des_proj * math.cos(theta_pos_proj) - nrm_vel_des_proj * math.sin(theta_pos_proj)
     
+
+
+
+    x_vel_des_proj = -lat_vel_des * math.sin(theta_pos_proj) - nrm_vel_des * math.cos(theta_pos_proj)
+    y_vel_des_proj = lat_vel_des * math.cos(theta_pos_proj) - nrm_vel_des * math.sin(theta_pos_proj)
     
     x_vel_error = x_vel_des_proj - global_vel[0]
     y_vel_error = y_vel_des_proj - global_vel[1]
@@ -153,16 +179,15 @@ def navigate_gate():
     
     # Create twist msg
     msg = Twist()
-    msg.linear.x = point_lateral_gain*nav_cmd_x_veh
-    msg.linear.y = point_lateral_gain*nav_cmd_y_veh
-    msg.linear.x = 0.0
-    msg.linear.y = 0.0
+    msg.linear.x = gate_lateral_gain*nav_cmd_x_veh
+    msg.linear.y = gate_lateral_gain*nav_cmd_y_veh
+    # msg.linear.x = 0.0
+    # msg.linear.y = 0.0
     msg.linear.z = cr.limit_value(sum(nav_cmd_z), nav_limit_z)
     msg.angular.z = cr.limit_value(sum(nav_cmd_r), nav_limit_r)
 
     log_array = Float32MultiArray()
     
-
 
 
 
@@ -179,8 +204,8 @@ def navigate_gate():
         lat_error_proj,
         nrm_error_proj,
         desired_norm_pos,
-        lat_vel_des_proj,
-        nrm_vel_des_proj,
+        lat_vel_des,
+        nrm_vel_des,
         x_vel_des_proj,
         y_vel_des_proj,
         global_vel[0],
@@ -248,10 +273,10 @@ def navigate_point():
     diff_global = current_state.fly.pos - bebop_p
     
 
-    rospy.loginfo("fly from")
-    rospy.loginfo([bebop_p[0], bebop_p[1], bebop_p[2], hdg])
-    rospy.loginfo("fly to")
-    rospy.loginfo(current_state.fly.pos)
+    # rospy.loginfo("fly from")
+    # rospy.loginfo([bebop_p[0], bebop_p[1], bebop_p[2], hdg])
+    # rospy.loginfo("fly to")
+    # rospy.loginfo(current_state.fly.pos)
     
     
     # LATERAL CONTROLLER
@@ -445,19 +470,27 @@ def callback_visual_gate_detection_changed(data):
     if len(data.format) == 0:
         pass
 
-    elif data.format != 'no gate':    
+    elif data.format != 'no gate':
         global current_gate
-        if current_gate is not None:
+        if current_gate is not None and current_gate.on_gate is None:
 
             if data.format == 'left' and current_gate.gate_orientation == 'horizontal':
                 current_gate.update('left')
+                bebop_model.update_frame_change(np.array([-.7, 0., 0.]))
+            
             elif data.format == 'right' and current_gate.gate_orientation == 'horizontal':
                 current_gate.update('right')
+                bebop_model.update_frame_change(np.array([.7, 0., 0.]))
 
-            if data.format == 'top' and current_gate.gate_orientation == 'vertical':
+            
+            elif data.format == 'top' and current_gate.gate_orientation == 'vertical':
                 current_gate.update('top')
+                bebop_model.update_frame_change(np.array([0., 0., 0.7]))
+            
+
             elif data.format == 'bottom' and current_gate.gate_orientation == 'vertical':
                 current_gate.update('bottom')
+                bebop_model.update_frame_change(np.array([0., 0., -0.7]))
 
         else:
             rospy.loginfo('Error: current_gate not initialized correctly')
@@ -480,15 +513,15 @@ def callback_visual_gate_detection_changed(data):
         gate_proj = np.matmul(R_body2track, meas_vec)
         pos_calc = gate_pos - gate_proj
 
-
         gate_log.append(pos_calc)
 
-    
+        
 
 def callback_bebop_odometry_changed(data):
     # main loop, every time odometry changes
     # global bebop_odometry
     bebop_pose = data.pose.pose.position
+    bebop_p = np.array([bebop_pose.x, bebop_pose.y, bebop_pose.z])
     quat = data.pose.pose.orientation
     bebop_hdg = tfs.euler_from_quaternion([quat.x, quat.y, quat.z, quat.w])[2]
     rospy.loginfo("Odom recieved: " + str([bebop_pose.x, bebop_pose.y, bebop_pose.z, bebop_hdg]))
@@ -497,8 +530,12 @@ def callback_bebop_odometry_changed(data):
     global bebop_model
     global nav_active
     global publisher_model
+    global publisher_visual_log
     global bebop_odometry
     global bebop_last_known_pos
+    global track_last_known_pos
+    global track_last_known_hdg
+    global bebop_last_known_hdg
     global bebop_last_odom_time
     global gate_gain_comp_filter
     global gate_log
@@ -506,6 +543,7 @@ def callback_bebop_odometry_changed(data):
 
     # Update body velocity
     bebop_model.update_body_vel(data.twist.twist.linear)
+
 
     # if there is no odometry, don't do anything
     if bebop_odometry is None:
@@ -523,7 +561,11 @@ def callback_bebop_odometry_changed(data):
 
         bebop_last_odom_time = time.time()
         bebop_odometry = data
-        return        
+
+        bebop_odom_transformed = bebop2track_transform_odom(data)
+        bebop_model.update_odom(bebop_odom_transformed)
+
+        return 
 
     # if there is no track frame reference point, set current position to takeoff 
     if bebop_last_known_pos is None:
@@ -537,23 +579,19 @@ def callback_bebop_odometry_changed(data):
     if nav_active == "off" or  nav_active == "point":
         bebop_odom_transformed = bebop2track_transform_odom(data)
         bebop_model.update_odom(bebop_odom_transformed)
+
         
-
-
 
 
     elif nav_active == 'through':
 
         bebop_odom_transformed = bebop2track_transform_odom(data)
-        bebop_model.update_orientation(bebop_odom_transformed)
-
-
-        current_track_odom = bebop2track_transform_odom(data)
-        pos_c = current_track_odom.pose.pose.position        
-
         
-        d_pos_bebop = np.array([pos_c.x, pos_c.y, pos_c.z]) - last_track_pos
+        bebop_model.update_orientation(bebop_odom_transformed)
+        
+        pos_c = bebop_odom_transformed.pose.pose.position
 
+        d_pos_odom = np.array([pos_c.x, pos_c.y, pos_c.z]) - last_track_pos
 
         if len(gate_log) > 0:
 
@@ -567,27 +605,59 @@ def callback_bebop_odometry_changed(data):
         
             d_pos_gate = avg - last_track_pos
 
-            d_pos_filtered = (1 - gate_gain_comp_filter) * d_pos_bebop + gate_gain_comp_filter * d_pos_gate
+            d_pos_filtered = (1 - gate_gain_comp_filter) * d_pos_odom + (gate_gain_comp_filter) * d_pos_gate
             
+            # print d_pos_filtered
 
             bebop_model.update_pose_gate(d_pos_filtered)
 
-            track_last_known_pos = np.array(bebop_model.pos)
-            bebop_last_known_pos = np.array([temp_pos.x,temp_pos.y,temp_pos.z])
+            track_last_known_pos = np.copy(bebop_model.pos)
+            bebop_last_known_pos = bebop_p
+
+
+            log_array = Float32MultiArray()
+            
+            
+            log_array.data = [x_avg,
+                              bebop_model.pos[0],
+                              y_avg,
+                              bebop_model.pos[1],
+                              z_avg,
+                              bebop_model.pos[2],
+                              bebop_last_known_pos[0],
+                              bebop_last_known_pos[1],
+                              track_last_known_pos[0],
+                              track_last_known_pos[1],
+                              bebop_last_known_hdg,
+                              track_last_known_hdg,
+                              d_pos_filtered[0],
+                              d_pos_filtered[1],
+                              d_pos_filtered[2],
+                              bebop_hdg,
+                              bebop_model.att[2]]
+
+
+            log_array.layout.dim.append(MultiArrayDimension())
+
+            log_array.layout.dim[0].label = 'gate_logs'
+            log_array.layout.dim[0].size = len(log_array.data)
+
+
+            publisher_visual_log.publish(log_array)
+
 
         else:
             
-            bebop_model.update_pose_gate(d_pos_bebop)
+            bebop_model.update_pose_gate(d_pos_odom)
 
 
 
 
-            
+    last_track_pos = np.copy(bebop_model.pos)
 
     # Send out bebops estimated position
     publisher_model.publish(bebop_model.get_drone_pose())
 
-    last_track_pos = bebop_model.pos
     bebop_odometry = data
 
     bebop_last_odom_time = time.time()
@@ -599,7 +669,9 @@ def update_last_known_bebop(odom):
     global bebop_last_known_hdg
     global bebop_last_known_pos
     global track_last_known_pos
+    global last_track_pos
 
+    
     pos = odom.pose.pose.position
     quat = odom.pose.pose.orientation
 
@@ -607,10 +679,18 @@ def update_last_known_bebop(odom):
     bebop_last_known_hdg = tfs.euler_from_quaternion([quat.x, quat.y, quat.z, quat.w])[2]
 
     track_last_known_pos[2] = pos.z
+    last_track_pos = np.copy(track_last_known_pos)
 
 
 
 def bebop2track_transform_odom(bebop_odom):
+
+    global track_last_known_pos
+    global bebop_last_known_pos
+    global bebop_last_known_hdg
+    global track_last_known_hdg
+
+
     pose = bebop_odom.pose.pose
     twist = bebop_odom.twist.twist.linear
 
@@ -620,7 +700,6 @@ def bebop2track_transform_odom(bebop_odom):
 
     hdg_bebop = tfs.euler_from_quaternion(bebop_q)[2]
     track_bebop_dhdg =  track_last_known_hdg - bebop_last_known_hdg
-    
 
     R_hdg = tfs.rotation_matrix(track_bebop_dhdg,(0,0,1))[0:3,0:3]
 
@@ -744,7 +823,7 @@ class State:
             self.time = time.time()
 
 
-        # if gate color is defined, publish gate color
+        # # if gate color is defined, publish gate color
         if self.gate_color is not None:
             msg = Float32MultiArray()
             msg.data = self.gate_color
@@ -765,7 +844,6 @@ class State:
             current_gate = self.current_gate
 
 
-        print '\n\n\n\n\n\nshould be printing now\n\n\n\n\n\n'
         # publish blind WP for ground control station
         if self.look is not None:
             msg = WP_Msg()    
@@ -790,8 +868,6 @@ class State:
             publisher_wp_fly.publish(msg)
 
 
-        print '\n\n\n\n\n\ndone publishing now\n\n\n\n\n\n'
-
 
         
     def exit(self):
@@ -812,7 +888,8 @@ class State:
             current_gate.reset()
 
         # enter new state
-        states[self.next_state].enter()
+        if self.next_state != 99:
+            states[self.next_state].enter()
 
 
     def check(self, navigation_distance):
@@ -871,7 +948,7 @@ if __name__ == '__main__':
     bebop_odometry = None                                       # latest odometry from bebop
     bebop_last_known_pos = None                                 # keep track of last known position of bebop for tranform to track frame
     bebop_last_known_hdg = None
-    track_last_known_pos = start_pos
+    track_last_known_pos = np.copy(start_pos)
     track_last_known_hdg = start_hdg
 
     state_auto = 0                                              # initialize state machine (number of state)
@@ -880,10 +957,10 @@ if __name__ == '__main__':
     loop_rate = 20                                              # frequency model and controller are run at
 
     current_gate = None
-    gate_log = None                                             # Filtered gate input from gate detection
+    gate_log = []                                               # Filtered gate input from gate detection
     gate_detected = False
-    gate_gain_comp_filter = .1                                  # input of the gate to the complementary filter
-    last_pos = None
+    gate_gain_comp_filter = .2                                  # input of the gate to the complementary filter
+
 
     bebop_last_odom_time = None                                 # Time log of the last bebop_odom data
     gate_last_meas_time = None                                  # Time log of the last gate data
@@ -891,7 +968,7 @@ if __name__ == '__main__':
     
     detection_active = False                                    # gate detection active boolean
     nav_active = "off"                                          # activated navigation algorithm
-    
+    last_track_pos = start_pos
     
     # PID Controller Classes
     nav_PID_z = cr.PID(1.0, 0, 0.0)
@@ -900,20 +977,23 @@ if __name__ == '__main__':
 
 
     # Controller Params
-    thr_nav_limit_lat = .1                                      # absolute limit to all cmd before being sent, thr_nav
+    thr_nav_limit_lat = .2                                      # absolute limit to all cmd before being sent, thr_nav
     
-    point_time_proj = .5                                     # acceleration response time 
+    point_time_proj = .5                                        # acceleration response time 
     point_nav_des_vel = 1.5                                     # max calculated velocity
-    point_vel_slope = 2.0                                      # Desired vel slope
+    point_vel_slope = 2.0                                       # Desired vel slope
     point_lateral_gain = 1.0                                    # Lateral command gain
     point_nav_limit_lat = .2                                    # lateral command limit
 
         
-    gate_nav_hold_dist = 2
-    gate_nav_theta_start = 20 * np.pi/180.0
+    gate_nav_hold_dist = 2.0
+
     gate_nav_theta_thr = 10 * np.pi/180.0
     gate_nav_des_vel_lat = 1.5
-    gate_nav_des_vel_nrm = 1.0
+    gate_nav_des_vel_nrm = 1.5
+    gate_lateral_gain = 1.0
+    vel_slope_gate_nrm = 1.2
+    vel_slope_gate_lat = 2.0
 
 
     nav_limit_z = .2                                            # Z command limit
@@ -941,7 +1021,7 @@ if __name__ == '__main__':
     publisher_nav_log = rospy.Publisher(            "/auto/navigation_logger",  Float32MultiArray,      queue_size=1, latch=True)
     publisher_visual_log = rospy.Publisher(         "/auto/visual_logger",      Float32MultiArray,      queue_size=1, latch=True)
 
-    publisher_gate_color = rospy.Publisher(         "/auto/gate_color",         Float32MultiArray,      queue_size=1, latch=True)
+    # publisher_gate_color = rospy.Publisher(         "/auto/gate_color",         Float32MultiArray,      queue_size=1, latch=True)
     publisher_gate_detection = rospy.Publisher(     "/auto/gate_detection",     Detection_Active,       queue_size=1, latch=True)
 
 	
@@ -960,13 +1040,14 @@ if __name__ == '__main__':
     gate_params1 = np.array([100, 140, 50, 140, 255, 255])
 
 
+
     # Navigation Waypoints    
     start_wp = cr.WP(np.array(start_pos),None)
 
     turn_pos_1 = cr.WP(np.array([2.0, -1.25, 1.7]),None)
     turn_pos_2 = cr.WP(np.array([-1.5, 11.25, 1.7]),None)
     
-    gate_1 = cr.Gate(v,np.array([-0.7, 0.0, 1.7]),-np.pi/2)
+    gate_1 = cr.Gate(v,np.array([-0.7, 0.0, 2.2]),-np.pi/2)
     gate_2 = cr.Gate(h,np.array([1.4, 10.0, 1.7]),np.pi/2)
     
 
@@ -985,33 +1066,26 @@ if __name__ == '__main__':
     
 
 
-    init_state = 8
+    init_state = 14
 
     # own_state, next_state, condition_type, condition_thres, exit_clear_visual, reset_gate, detection_active_type, nav_active_str, gate_color, fly, look, gate)
     
     states = [State()] * 100
-    # states[02] = State(02, 03, "bebop", cr.Bebop.TAKEOFF,  0, 0, 0, o, None, None, None, None)                                  # Landed
-    # states[03] = State(03, 04, "bebop", cr.Bebop.HOVERING, 0, 0, 0, o, None, None, None, None)                                  # Taking off
-    # states[04] = State(04, 10, "time",  1.0,               0, 0, 0, o, None, None, None, None)                                  # Hovering
+    # states[02] = State(02, 03, "bebop", cr.Bebop.TAKEOFF,  0, 0, 0, o, None, None, None, None)                                                      # Landed
+    # states[03] = State(03, 04, "bebop", cr.Bebop.HOVERING, 0, 0, 0, o, None, None, None, None)                                                      # Taking off
+    # states[04] = State(04, 10, "time",  1.0,               0, 0, 0, o, None, None, None, None)                                                      # Hovering
 
 
 
 
-    states[8]  = State( 8, 90, "time",  1000.0,            0, 0, 0, t, gate_params1,   gate_1.look_pos,        gate_1.pos,        gate_1)                   # testing 
-
-    # states[10] = State(10, 11, "dist",  0.3,               0, 0, 0, p, None,           gate_1.look_pos,        loop_temp_wp,         None)                   # testing 
-    # states[11] = State(11, 10, "dist",  0.3,               0, 0, 0, p, None,           start_pos_wp,           loop_temp_wp,         None)                   # testing 
-
-    states[10] = State(10, 11, "dist",  0.5,               0, 0, 0, p, None,           temp_wp1,               look_audience,     None)                   # testing 
-    states[11] = State(11, 12, "dist",  0.5,               0, 0, 0, p, None,           temp_wp2,               look_audience,     None)                   # testing 
-    states[12] = State(12, 13, "dist",  0.5,               0, 0, 0, p, None,           temp_wp3,               look_audience,     None)                   # testing 
-    states[13] = State(13, 14, "dist",  0.5,               0, 0, 0, p, None,           temp_wp4,               look_audience,     None)                   # testing 
-
-
-    states[14] = State(14, 15, "wp",    None,              0, 0, v, p, gate_params1,   gate_1.look_pos,        gate_1.pos,         gate_1)                 # Move and Look for gate
-    states[15] = State(15, 16, "dist",  dist_gate_close,   1, 0, v, t, gate_params1,   gate_1.pos,             gate_1.pos,         gate_1)                 # move through gate until cant see it
-    states[16] = State(16, 17, "dist",  exit_thrs,         0, 1, 0, p, None,           gate_1.exit_pos,        turn_pos_1,         None)                   # Move through gate
-    states[17] = State(17, 14, "dist",  dist_gate_blind,   0, 0, 0, p, None,           turn_pos_1,             gate_2.pos,         None)                   # Turn around manuever
+    states[8]  = State( 8, 9,  "dist",  1.0,            0, 0, 0, t, None,   gate_1.pos,        gate_1.pos,        gate_1)               # testing 
+    states[9]  = State( 9, 99, "dist",  1.0,            0, 0, 0, p, None,   gate_1.exit_pos,   gate_1.exit_pos,   None)               # testing 
+    
+    
+    states[14] = State(14, 15, "wp",    None,              0, 0, h, p, gate_params1,   gate_1.look_pos,        gate_1.pos,         gate_1)              # Move and Look for gate
+    states[15] = State(15, 16, "dist",  dist_gate_close,   1, 0, h, t, gate_params1,   gate_1.pos,             gate_1.pos,         gate_1)              # move through gate until cant see it
+    states[16] = State(16, 99, "dist",  exit_thrs,         0, 1, 0, p, None,           gate_1.exit_pos,        gate_1.exit_pos,    None)                # Move through gate
+    states[17] = State(17, 14, "dist",  dist_gate_blind,   0, 0, 0, p, None,           turn_pos_1,             gate_2.pos,         None)                # Turn around manuever
 
 
     '''
@@ -1051,22 +1125,20 @@ if __name__ == '__main__':
     
     while bebop_odometry is None:
         time.sleep(.5)
-    
+
+
+    rospy.loginfo("Odometry recieved")
     update_last_known_bebop(bebop_odometry)
+
 
     rospy.loginfo("Waiting for autonomy")
     while not autonomy_active:
         time.sleep(.25)
     
-
-    
-
-    
-
-    rospy.loginfo("Autonomy active, starting states")
+        
     # enter state init_state in state machine
+    rospy.loginfo("Autonomy active, starting states")
     publisher_state_auto.publish(init_state)
-    print states[init_state]
     states[init_state].enter()
 
     
