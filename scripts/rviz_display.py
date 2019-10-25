@@ -26,6 +26,7 @@ import sys
 import tf
 import os 
 
+
 def signal_handler(signal, frame):
     sys.exit(0)
 
@@ -41,7 +42,7 @@ class bebop_data:
         self.gate_number = 0
         self.state_level = 0
 
-        self.battery_level = 0
+        self.battery_level = -1
         self.playing_audio = False
         self.gate_size = 1.4
 

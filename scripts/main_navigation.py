@@ -558,7 +558,12 @@ def callback_visual_gate_detection_changed(data):
         pos_calc = bebop_model.pos + gate_proj
         
 
-        if len(gate_log) > 9:
+        if len(gate_log) < 9:
+            gate_log.append(pos_calc)
+
+        else:
+
+            
             gate_log.pop(0)
             gate_log.append(pos_calc)
 
@@ -572,8 +577,33 @@ def callback_visual_gate_detection_changed(data):
             if std_pos < std_gate_thres:
                 rospy.loginfo('Std below threshold: '+str(std_pos))
 
+
+
+                # Estimate current gate position based on first estimated position
+                global estimate_vertical_gate
+                global estimate_horizontal_gate
+                
+                if current_gate.format = 'vertical' and estimate_vertical_gate:
+                    
+                    if np.mean(gate_log_np[:,2:3]) > current_gate.pos.pos[2]:
+                        current_gate.update_format('up')
+                    else:
+                        current_gate.update_format('down')
+
+
+                if current_gate.format = 'horizontal' and estimate_horizontal_gate:
+
+                    if np.mean(gate_log_np[:,0:1]) < current_gate.pos.pos[0]:
+                        current_gate.update_format('left')
+                    else:
+                        current_gate.update_format('right')
+
+
+
                 gate_pos = current_gate.pos.pos
                 pos_calc = gate_pos - gate_proj
+
+
                 gate_log = [pos_calc]
                 gate_detected = True
 
@@ -606,8 +636,6 @@ def callback_visual_gate_detection_changed(data):
 
             publisher_visual_log.publish(log_array)
 
-        else:
-            gate_log.append(pos_calc)
         
 
 
@@ -1069,6 +1097,11 @@ if __name__ == '__main__':
 
     bebop_model = cr.Bebop_Model(start_pos,start_hdg)           # Initialize odometry message to store position
 
+
+
+
+
+
     bebop_odometry = None                                       # latest odometry from bebop
     bebop_last_known_pos = None                                 # keep track of last known position of bebop for tranform to track frame
     bebop_last_known_hdg = None
@@ -1085,6 +1118,8 @@ if __name__ == '__main__':
     gate_detected = None
     gate_gain_comp_filter = .2                                  # input of the gate to the complementary filter
     std_gate_thres = 1.4
+    estimate_vertical_gate = True
+    estimate_horizontal_gate = True
 
 
     bebop_last_odom_time = None                                 # Time log of the last bebop_odom data
