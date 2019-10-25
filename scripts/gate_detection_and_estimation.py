@@ -36,42 +36,34 @@ NOT_GATE_SIZE = 1.18
 
 
 # HSV thresholds for LED gate
-hsv_thresh_low = (0, 0, 250)
-hsv_thresh_high = (180, 50, 255)
+hsv_thresh_low = (0, 0, 190)
+hsv_thresh_high = (180, 255, 255)
 
 # HSV thresholds for non-LED gate
 not_gate_hsv_thresh_low = (0, 0, 0)
 not_gate_hsv_thresh_high = (180, 255, 100)
 
 # Gate thresholds
-AREA_THRESH = 1000
-ASPECT_RATIO_THRESH_LOW = 0.7 # Should be between 0.0 and 1.0
+AREA_THRESH = 2000
+ASPECT_RATIO_THRESH_LOW = 0.5 # Should be between 0.0 and 1.0
 ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
 SOLIDITY_THRESH = 0.90
-ROI_MEAN_THRESH = 100
+ROI_MEAN_THRESH = 130
 
-DETECTION_ACTIVE = True
+DETECTION_ACTIVE = False
 GATE_TYPE_VERTICAL = True
+NO_GATE_DETECTION = True
 
 ########################################################################
 
 ########################### Global Variables  ##########################
-
-# Camera Capture
-cap = cv2.VideoCapture(0)
-cap.set(3, 2560) # Width 2560x720
-cap.set(4, 720) # Height
-cap.set(5, 60) # FPS
-FRAME_WIDTH = cap.get(3)
-
-bridge = CvBridge()
 
 drone_position = np.zeros(3, float)
 drone_orientation = np.zeros(3, float)
 drone_linear_vel = np.zeros(3, float)
 drone_angular_vel = np.zeros(3, float)
 
-BATTERY_THRESH = 20 # Battery threshold for stopping
+BATTERY_THRESH = 12 # Battery threshold for stopping
 
 ########################################################################
 
@@ -209,7 +201,7 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high, areaIndex):
     #cv2.imshow('mask', mask)
 
     # Blur 
-    blur = cv2.GaussianBlur(mask,(3,3), 3)
+    blur = cv2.GaussianBlur(mask,(5,5), 5)
     #cv2.imshow('Blur', blur)
 
     # Find contours
@@ -354,32 +346,59 @@ def battery_callback(battery_msg):
         rospy.logerr("Drone Battery < {} %.".format(BATTERY_THRESH))
         
 def gate_detection_active_callback(det_active):
-	global DETECTION_ACTIVE, GATE_TYPE_VERTICAL
-	DETECTION_ACTIVE =  det_active.active
-	GATE_TYPE_VERTICAL = det_active.vertical
+    global DETECTION_ACTIVE, GATE_TYPE_VERTICAL, NO_GATE_DETECTION
+    DETECTION_ACTIVE =  det_active.active.data
+    GATE_TYPE_VERTICAL = det_active.vertical.data
+    
+    if det_active.gate_num == 1:
+	# HSV thresholds for LED gate
+	hsv_thresh_low = (0, 0, 240)
+	hsv_thresh_high = (180, 255, 255)
+
+	# Gate thresholds
+	AREA_THRESH = 2000
+	ASPECT_RATIO_THRESH_LOW = 0.5 # Should be between 0.0 and 1.0
+	ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
+	ROI_MEAN_THRESH = 100
+	
+    elif det_active.gate_num == 2:
+	# HSV thresholds for LED gate
+	hsv_thresh_low = (0, 0, 200)
+	hsv_thresh_high = (180, 255, 255)
+
+	# Gate thresholds
+	AREA_THRESH = 5000
+	ASPECT_RATIO_THRESH_LOW = 0.8 # Should be between 0.0 and 1.0
+	ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
+	ROI_MEAN_THRESH = 150
+    else:
+	pass
+
 
 def detect_gate_type(gate, not_gate, gate_detection_str):
-	global GATE_TYPE_VERTICAL
-	if gate_detection_str == "gate":
-		difference = gate - not_gate
-		if (np.linalg.norm(difference) - 1.4) <= 0.2: # Both gates are reliably detected
-			if not GATE_TYPE_VERTICAL: # gate is horizontal
-				if difference[1] > 0: # gate is left to no_gate
-					gate_detection_str = "left"
-				else:
-					gate_detection_str = "right"
-			else:
-				if difference[2] > 0: # gate is vertical
-					gate_detection_str = "up"
-				else:
-					gate_detection_str = "down"
+    global GATE_TYPE_VERTICAL
+    if gate_detection_str == "gate":
+	difference = gate.reshape(3) - not_gate.reshape(3)
+	#print("Difference : {}".format(difference))
+	if (np.linalg.norm(difference) - 1.4) <= 0.2: # Both gates are reliably detected
+	    if not GATE_TYPE_VERTICAL: # gate is horizontal
+		if difference[1] > 0: # gate is left to no_gate
+		    gate_detection_str = "left"
+		else:
+		    gate_detection_str = "right"
+	    else:
+		if difference[2] > 0: # gate is vertical
+		    gate_detection_str = "up"
+		else:
+		    gate_detection_str = "down"
+	else:
+	    pass
+    else:
+	pass
 
 
 
 if __name__ == '__main__':
-	
-	global DETECTION_ACTIVE, GATE_TYPE_VERTICAL
-
     signal.signal(signal.SIGINT, signal_handler)
 
     # Set simulation parameter to True. The system will start in simulation mode by default.
@@ -406,74 +425,100 @@ if __name__ == '__main__':
     land_publisher = rospy.Publisher('/bebop/land', Empty, queue_size=1)
     
 
-    # Update rate for the control loop
+    # Update rate for the gate detection loop
     rate = rospy.Rate(LOOP_FREQ) # LOOP_FREQ hz
+    
+    # Camera Capture
+    cap = cv2.VideoCapture(0)
+    ret, img = cap.read()
+    if img is None:
+	cap = cv2.VideoCapture(1)
+	
+    cap.set(3, 2560) # Width 2560x720
+    cap.set(4, 720) # Height
+    cap.set(5, 60) # FPS
+    FRAME_WIDTH = cap.get(3)
+
+    bridge = CvBridge()
 
     gate_detection_string = "no_gate"
+    mva_tvec = np.zeros(3, float)
+    raw_ng_tvec = np.zeros(3, float)
     start = time()
     
     while not rospy.is_shutdown():
-        
         if DETECTION_ACTIVE:
-			ret, img = cap.read()
-			if img is None:
-				rospy.logerr("No Camera detected!!!")
-			else:
-				# For Zed Stereo
-				img = img[:,:int(FRAME_WIDTH/2)]
-				
-				# Gate detection           
-				gate = detect_gate(img, hsv_thresh_low, hsv_thresh_high, -1)
-				not_gate = detect_gate(img, not_gate_hsv_thresh_low, not_gate_hsv_thresh_high, 0)
-				
-				# If gate detected succesfully
-				if gate is not None and np.array_equal(gate.shape, [4,2]):
-					cv2.drawContours(img, [gate.reshape(4,2)], 0, (255, 0, 0), 2)
-					annotateCorners(gate, img)  
-					raw_euler, raw_tvec = getGatePose(gate, GATE_SIZE)
-					raw_ng_euler, raw_ng_tvec = getGatePose(gate, GATE_SIZE)
-					ng_tvec = noGateTvecFilter.update(raw_ng_tvec)
-					
-					if raw_euler[2] > np.pi or (np.linalg.norm(raw_tvec) > 30): # Outlier rejection
-						gate_detection_string = "no_gate"
-					else:
-						gate_detection_string = "gate"                   
-				else:
-					gate_detection_string = "no_gate"
-					
-				if gate_detection_string == "no_gate":
-					raw_euler = np.zeros(3, float)
-					raw_tvec = np.zeros(3, float)
-					KF.C = np.zeros(KF.C.shape, float) 	# No measurements, rely only on prediction
-				else:  
-					KF.C = np.eye(KF.C.shape[0], dtype='float') # Use measurements to fuse with predictions
-					
-				# Kalman Filtering
-				euler = orientationFilter.update(raw_euler)         
-				gateHeading = filterHeading(euler[2], drone_orientation[2])
+	    ret, img = cap.read()
+	    if img is None:
+		rospy.logerr("No Camera detected!!!")
+	    else:
+		# For Zed Stereo
+		img = img[:,:int(FRAME_WIDTH/2)]
 		
-				mva_tvec = translationFilter.update(raw_tvec)
-				
-				Y = mva_tvec.reshape((3,1))
-				U = np.matmul( tfs.rotation_matrix(gateHeading, (0,0,1))[:3,:3], drone_linear_vel.reshape((3,1)) )
-				KF.dt = (time() - start)
-				start = time()
-				KF.filter(U,Y)
-				X = KF.X.copy()
-				
-				# Detect gate type
-				gate_type = detect_gate_type(X, ng_tvec, gate_detection_string)
-				
-				# Send messages
-				filtered_gate_WP = array2WP(X, gateHeading, gate_detection_string)
-				gate_WP = array2WP(raw_tvec, raw_euler[2], "")
-				gate_pose_pub.publish(gate_WP)
-				filtered_gate_pose_pub.publish(filtered_gate_WP) 
-				
-			else:
-				pass
-            rospy.loginfo("LOOP Frequency: {} Hz".format(1/(time() - start)))
-            #img = cv2.resize(img, None, fx=0.25, fy=0.25)   
-            image_publisher.publish(bridge.cv2_to_imgmsg(img,"bgr8"))
+		# Gate detection           
+		gate = detect_gate(img, hsv_thresh_low, hsv_thresh_high, -1)
+		
+		# If gate detected succesfully
+		if gate is not None and np.array_equal(gate.shape, [4,2]):
+		    cv2.drawContours(img, [gate.reshape(4,2)], 0, (255, 0, 0), 2)
+		    annotateCorners(gate, img)  
+		    raw_euler, raw_tvec = getGatePose(gate, GATE_SIZE)
+		    
+		    #Detect no_gate
+		    no_gate = detect_gate(img, not_gate_hsv_thresh_low, not_gate_hsv_thresh_high, 0)
+		    
+		    #If no_gate is succefully detected
+		    if no_gate is not None and np.array_equal(no_gate.shape, [4,2]):
+			raw_ng_euler, raw_ng_tvec = getGatePose(no_gate, NOT_GATE_SIZE)
+
+			
+		    if raw_euler[2] > np.pi or (np.linalg.norm(raw_tvec) > 15): # Outlier rejection
+			gate_detection_string = "no_gate"
+		    else:
+			gate_detection_string = "down"                   
+		else:
+		    gate_detection_string = "no_gate"
+			
+		if gate_detection_string == "no_gate":
+		    raw_euler = np.zeros(3, float)
+		    raw_tvec = np.zeros(3, float)
+		    raw_ng_tvec = np.zeros(3, float)
+		    KF.C = np.zeros(KF.C.shape, float) 	# No measurements, rely only on prediction
+		else:  
+		    KF.C = np.eye(KF.C.shape[0], dtype='float') # Use measurements to fuse with predictions
+		    mva_tvec = translationFilter.update(raw_tvec)
+			
+		# Kalman and MVA Filtering
+		euler = orientationFilter.update(raw_euler)         
+		gateHeading = filterHeading(euler[2], drone_orientation[2])
+
+
+		Y = mva_tvec.reshape((3,1))
+		U = drone_linear_vel.reshape((3,1))
+		KF.dt = (time() - start)
+		start = time()
+		KF.filter(U,Y)
+		X = KF.X.copy()
+		
+		# Detect gate type
+		ng_tvec = noGateTvecFilter.update(raw_ng_tvec)
+		detect_gate_type(X, ng_tvec, gate_detection_string)
+		#print("X : {}".format(X))
+		# Send messages
+		filtered_gate_WP = array2WP(X, gateHeading, gate_detection_string)
+		gate_WP = array2WP(raw_tvec, raw_euler[2], "")
+		gate_pose_pub.publish(gate_WP)
+		filtered_gate_pose_pub.publish(filtered_gate_WP) 
+		
+		rospy.loginfo("LOOP Frequency: {} Hz".format(1/KF.dt))
+		img = cv2.resize(img, None, fx=0.25, fy=0.25) 
+		image_publisher.publish(bridge.cv2_to_imgmsg(img,"bgr8"))
+		
+	else:
+	    rate.sleep()
+	    pass
+    
+		
+	
 
             
