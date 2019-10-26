@@ -358,6 +358,7 @@ def gate_detection_active_callback(det_active):
 	DETECTION_ACTIVE =  det_active.active
 	GATE_TYPE_VERTICAL = det_active.vertical
 
+
 def detect_gate_type(gate, not_gate, gate_detection_str):
 	global GATE_TYPE_VERTICAL
 	if gate_detection_str == "gate":
