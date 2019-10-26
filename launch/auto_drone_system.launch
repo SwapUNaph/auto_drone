@@ -11,13 +11,13 @@
 	<!-- <node type="rviz" name="rviz" pkg="rviz" args="-d $(find auto_drone)/rviz/gatedetector_test.rviz" /> -->
 
 	<!-- Launch gate_detector node -->
-	<node pkg="auto_drone" type="gate_detection_and_estimation.py" name="gate_detector" output="screen"/>
+	<node pkg="auto_drone" type="gate_detection_and_estimation.py" name="gate_detector"/>
 	
 	<!-- Launch main navigation node -->
-	<!-- <node pkg="auto_drone" type="main_navigation.py" name="main_navigation" output="screen"/> -->
+	<node pkg="auto_drone" type="main_navigation.py" name="main_navigation" output="screen"/>
 	
 	<!-- Launch bebop driver -->
-	<include file="$(find bebop_driver)/launch/bebop_node.launch"/>
+	<!--<include file="$(find bebop_driver)/launch/bebop_node.launch"/>-->
 	
 	
 

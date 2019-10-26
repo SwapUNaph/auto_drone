@@ -85,7 +85,7 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
     #cv2.imshow('mask', mask)
 
     # Blur 
-    blur = cv2.GaussianBlur(mask,(3,3), 3)
+    blur = cv2.GaussianBlur(mask,(7,7), 5)
     #cv2.imshow('Blur', blur)
 
     # Find contours
@@ -150,12 +150,26 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
                 gate_cnt_sorted[3] = point
             else:
                 gate_cnt_sorted[2] = point
-                
+		
         gate_cnt_sorted_np = np.array(gate_cnt_sorted)
-        return gate_cnt_sorted_np
+	x,y,w,h = cv2.boundingRect(gate_cnt_sorted_np)
+	
+	right_x = x + w
+	left_x = x - w
+	print 
+	
+	if y-40 > 0 and y+h+40 < img.shape[0] and x-40 > 0 and x+h+40 < img.shape[1]:
+	    left_img = mask[y-30:y+h+30, left_x-30:left_x+w+30]
+	    right_img = mask[y-30:y+h+30, right_x-30:right_x+w+30]
+
+
+	else:
+	    left_img = None
+	    right_img = None
+        return gate_cnt_sorted_np, left_img, right_img
     else:
         #print("No gate detected!")
-        return None
+        return None, None, None
 
 with open(filename, 'r') as th_file:
     vals = th_file.readlines()[0].split(" ")
@@ -256,15 +270,20 @@ cv2.createTrackbar(save_bar, window_detection_name, 0, 1, on_save)
 frame_count = 0
 while True:
     if LIVE: 
-	    ret, frame = cap.read()
-	    frame_count = frame_count + 1
-	    if frame is None:
-		break
+	ret, frame = cap.read()
+	frame_count = frame_count + 1
+	if frame is None:
+	    break
 
+    frame = frame[:,:int(cap.get(3)/2)]
+    frame = cv2.resize(frame, None, fx=0.5, fy=0.5) 
+    
     frame_HSV = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     frame_threshold = cv2.inRange(frame_HSV, (low_H, low_S, low_V), (high_H, high_S, high_V))
+    # Blur 
+    blur = cv2.GaussianBlur(frame_threshold,(7,7), 5)
 
-    gate = detect_gate(frame, (low_H, low_S, low_V), (high_H, high_S, high_V))
+    gate, left_img, right_img = detect_gate(frame, (low_H, low_S, low_V), (high_H, high_S, high_V))
             
     # If gate detected succesfully
     if gate is not None and np.array_equal(gate.shape, [4,2]):
@@ -272,7 +291,10 @@ while True:
         annotateCorners(gate, frame)  
                 
     cv2.imshow(window_capture_name, frame)
-    cv2.imshow(window_detection_name, frame_threshold)
+    if left_img is not None:
+	cv2.imshow("left_window", left_img)
+	cv2.imshow("right window", right_img)
+    cv2.imshow(window_detection_name, blur)
 
     key = cv2.waitKey(100)
     if key == ord('q') or key == 27:

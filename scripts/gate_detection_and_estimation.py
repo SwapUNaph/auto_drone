@@ -36,42 +36,34 @@ NOT_GATE_SIZE = 1.18
 
 
 # HSV thresholds for LED gate
-hsv_thresh_low = (0, 0, 250)
-hsv_thresh_high = (180, 50, 255)
+hsv_thresh_low = (0, 0, 190)
+hsv_thresh_high = (180, 255, 255)
 
 # HSV thresholds for non-LED gate
 not_gate_hsv_thresh_low = (0, 0, 0)
 not_gate_hsv_thresh_high = (180, 255, 100)
 
 # Gate thresholds
-AREA_THRESH = 1000
-ASPECT_RATIO_THRESH_LOW = 0.7 # Should be between 0.0 and 1.0
+AREA_THRESH = 2000
+ASPECT_RATIO_THRESH_LOW = 0.5 # Should be between 0.0 and 1.0
 ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
 SOLIDITY_THRESH = 0.90
-ROI_MEAN_THRESH = 100
+ROI_MEAN_THRESH = 130
 
-DETECTION_ACTIVE = True
+DETECTION_ACTIVE = False
 GATE_TYPE_VERTICAL = True
+NO_GATE_DETECTION = True
 
 ########################################################################
 
 ########################### Global Variables  ##########################
-
-# Camera Capture
-cap = cv2.VideoCapture(0)
-cap.set(3, 2560) # Width 2560x720
-cap.set(4, 720) # Height
-cap.set(5, 60) # FPS
-FRAME_WIDTH = cap.get(3)
-
-bridge = CvBridge()
 
 drone_position = np.zeros(3, float)
 drone_orientation = np.zeros(3, float)
 drone_linear_vel = np.zeros(3, float)
 drone_angular_vel = np.zeros(3, float)
 
-BATTERY_THRESH = 20 # Battery threshold for stopping
+BATTERY_THRESH = 12 # Battery threshold for stopping
 
 ########################################################################
 
@@ -209,7 +201,7 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high, areaIndex):
     #cv2.imshow('mask', mask)
 
     # Blur 
-    blur = cv2.GaussianBlur(mask,(3,3), 3)
+    blur = cv2.GaussianBlur(mask,(5,5), 5)
     #cv2.imshow('Blur', blur)
 
     # Find contours
@@ -353,9 +345,33 @@ def battery_callback(battery_msg):
         rospy.logerr("Drone Battery < {} %.".format(BATTERY_THRESH))
         
 def gate_detection_active_callback(det_active):
-	global DETECTION_ACTIVE, GATE_TYPE_VERTICAL
-	DETECTION_ACTIVE =  det_active.active
-	GATE_TYPE_VERTICAL = det_active.vertical
+    global DETECTION_ACTIVE, GATE_TYPE_VERTICAL, NO_GATE_DETECTION
+    DETECTION_ACTIVE =  det_active.active.data
+    GATE_TYPE_VERTICAL = det_active.vertical.data
+    
+    if det_active.gate_num == 1:
+	# HSV thresholds for LED gate
+	hsv_thresh_low = (0, 0, 240)
+	hsv_thresh_high = (180, 255, 255)
+
+	# Gate thresholds
+	AREA_THRESH = 2000
+	ASPECT_RATIO_THRESH_LOW = 0.5 # Should be between 0.0 and 1.0
+	ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
+	ROI_MEAN_THRESH = 100
+	
+    elif det_active.gate_num == 2:
+	# HSV thresholds for LED gate
+	hsv_thresh_low = (0, 0, 200)
+	hsv_thresh_high = (180, 255, 255)
+
+	# Gate thresholds
+	AREA_THRESH = 5000
+	ASPECT_RATIO_THRESH_LOW = 0.8 # Should be between 0.0 and 1.0
+	ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
+	ROI_MEAN_THRESH = 150
+    else:
+	pass
 
 
 def getLeftRightProb(img,gate_pnts):
@@ -575,10 +591,8 @@ def detect_gate_type(img, gate):
 
 
 
-if __name__ == '__main__':
-	
-	global DETECTION_ACTIVE, GATE_TYPE_VERTICAL
 
+if __name__ == '__main__':
     signal.signal(signal.SIGINT, signal_handler)
 
     # Set simulation parameter to True. The system will start in simulation mode by default.
@@ -605,14 +619,28 @@ if __name__ == '__main__':
     land_publisher = rospy.Publisher('/bebop/land', Empty, queue_size=1)
     
 
-    # Update rate for the control loop
+    # Update rate for the gate detection loop
     rate = rospy.Rate(LOOP_FREQ) # LOOP_FREQ hz
+    
+    # Camera Capture
+    cap = cv2.VideoCapture(0)
+    ret, img = cap.read()
+    if img is None:
+	cap = cv2.VideoCapture(1)
+	
+    cap.set(3, 2560) # Width 2560x720
+    cap.set(4, 720) # Height
+    cap.set(5, 60) # FPS
+    FRAME_WIDTH = cap.get(3)
+
+    bridge = CvBridge()
 
     gate_detection_string = "no_gate"
+    mva_tvec = np.zeros(3, float)
+    raw_ng_tvec = np.zeros(3, float)
     start = time()
     
     while not rospy.is_shutdown():
-        
         if DETECTION_ACTIVE:
 			ret, img = cap.read()
 			if img is None:
