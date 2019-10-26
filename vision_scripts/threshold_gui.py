@@ -152,6 +152,8 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
                 gate_cnt_sorted[2] = point
 		
         gate_cnt_sorted_np = np.array(gate_cnt_sorted)
+	
+	'''
 	x,y,w,h = cv2.boundingRect(gate_cnt_sorted_np)
 	
 	right_x = x + w
@@ -166,7 +168,8 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high):
 	else:
 	    left_img = None
 	    right_img = None
-        return gate_cnt_sorted_np, left_img, right_img
+	'''
+        return gate_cnt_sorted_np, None, None
     else:
         #print("No gate detected!")
         return None, None, None

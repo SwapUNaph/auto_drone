@@ -36,12 +36,12 @@ NOT_GATE_SIZE = 1.18
 
 
 # HSV thresholds for LED gate
-hsv_thresh_low = (0, 0, 190)
-hsv_thresh_high = (180, 255, 255)
+hsv_thresh_low = (0, 0, 200)
+hsv_thresh_high = (180, 200, 255)
 
 # HSV thresholds for non-LED gate
-not_gate_hsv_thresh_low = (0, 0, 0)
-not_gate_hsv_thresh_high = (180, 255, 100)
+not_gate_hsv_thresh_low = (0, 0, 20)
+not_gate_hsv_thresh_high = (180, 255, 70)
 
 # Gate thresholds
 AREA_THRESH = 2000
@@ -50,8 +50,8 @@ ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
 SOLIDITY_THRESH = 0.90
 ROI_MEAN_THRESH = 130
 
-DETECTION_ACTIVE = False
-GATE_TYPE_VERTICAL = True
+DETECTION_ACTIVE = True
+GATE_TYPE_VERTICAL = False
 NO_GATE_DETECTION = True
 
 ########################################################################
@@ -154,7 +154,6 @@ def signal_handler(_, __):
 def logMeasuredGatePose(X):
     euler = X[3:] * 180.0 / math.pi
     rospy.loginfo("\nPosition: {} (m) \nOrientation: {}(deg)\n".format(X[:3],euler))
-    
     
 def aspectRatio(contour):
     x,y,w,h = cv2.boundingRect(contour)
@@ -273,6 +272,125 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high, areaIndex):
         print("No gate detected!")
         return None
 
+def getHoughLines(img_org):
+
+	# img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+	img = np.copy(img_org)
+
+	#hsv_gate2_low = np.array([20, 5, 5])
+	#hsv_gate2_high = np.array([50, 40, 40])
+	# 0 0 247 180 20 255
+
+
+	img = cv2.GaussianBlur(img,(7,7), 5)
+	img = cv2.inRange(img, not_gate_hsv_thresh_low, not_gate_hsv_thresh_high)
+	#img =  cv2.erode(img, np.ones((3,3), dtype=np.uint8), iterations=1)
+
+	# Remove blobs
+	if bool(1):
+		minSize = 10000
+		# get connectivity data
+		nb_components, output, stats, centroids = cv2.connectedComponentsWithStats(img, connectivity=8)
+		# remove background image
+		stats = stats[1:]; nb_components -= 1
+		# create return image
+		img = np.zeros((output.shape), dtype=np.uint8)
+		# for every component in the image, keep only if it's above minSize
+		for i in range(nb_components):
+		   if stats[i,4] >= minSize:
+			   img[output == i + 1] = 255
+
+
+
+	# img = cv2.GaussianBlur(img,(3,3), 3)
+
+	# Canny
+	canny_minVal=50
+	canny_maxVal=250
+	canny_grad=3
+	img = cv2.Canny(img, canny_minVal, canny_maxVal, None, canny_grad)
+	img = cv2.dilate(img, np.ones((3,3), dtype=np.uint8), iterations=1)
+
+
+	
+	# Hough Lines
+	hough_pixelRes=1
+	hough_angleRes=np.pi/180.
+	hough_minNumIntersections=120
+	hough_minLineLength=50
+	hough_maxLineGap=20
+	hough_lineExtension=25.0
+
+	# lines = cv2.HoughLines(img, hough_pixelRes, hough_angleRes, hough_minNumIntersections, None, hough_minLineLength, hough_maxLineGap)
+
+	# if lines is not None:
+	# 	print 'len: ',len(lines)
+
+	# 	for i in range(0, len(lines)):
+	# 		rho = lines[i][0][0]
+	# 		theta = lines[i][0][1]
+	# 		a = math.cos(theta)
+	# 		b = math.sin(theta)
+	# 		x0 = a * rho
+	# 		y0 = b * rho
+	# 		pt1 = (int(x0 + 1000*(-b)), int(y0 + 1000*(a)))
+	# 		pt2 = (int(x0 - 1000*(-b)), int(y0 - 1000*(a)))
+	# 		cv2.line(img, pt1, pt2, (255,255,255), 5, -1)
+
+	# img_n = np.zero(img.shape[0],img.shape[1])
+
+
+	linesP = cv2.HoughLinesP(img, hough_pixelRes, hough_angleRes, hough_minNumIntersections, None, hough_minLineLength, hough_maxLineGap)
+	
+	theta_min = 20 * np.pi/180.
+	theta_max = 70 * np.pi/180.
+
+
+	if linesP is not None:
+	    for i in range(0, len(linesP)):
+		l = linesP[i][0]
+		theta = math.atan(abs(l[3]-float(l[1]))/abs(float(l[2])-l[0]))
+		#print l,', ',theta
+		if theta < theta_min or theta > theta_max:
+		    cv2.line(img_org, (l[0], l[1]), (l[2], l[3]), (0,0,255), 1, cv2.LINE_AA)
+
+
+	# # Hough intersections
+	# if not(np.any(lines)):
+	#    print "ERROR: no hough lines exist for getHoughIntersections."
+	#    return None
+
+	# # clear any existing hough intersections
+	# points = []
+	# check_list = np.array([[0,0]], dtype=np.int32)
+
+	# # there are smarter ways to do this but eh
+	# for line1 in self._hough_lines:
+	#    for line2 in self._hough_lines:
+
+	#         # check if the line normals are 'different enough'
+	#         if not(line1.checkNormals(line2, tol=1.0)):
+
+	#            # if they are, get the intesection point then double check
+	#            # that you actually got a point back
+	#            int_point = line1.getIntersectionPoint(line2)
+	#            if int_point:
+
+	#                # round point to the nearest int and ensure it's unique
+	#                # before adding to the final list
+	#                int_point.roundToInt()
+	#                if not([int_point.x, int_point.y] in check_list.tolist()):
+	#                    check_list = np.append(check_list, np.array([[int_point.x, int_point.y]], dtype=np.int32), axis=0)
+	#                    points.append([int_point.x, int_point.y])
+
+	# self._hough_intersectionPoints_p = np.array(points, dtype=np.float32)
+
+	# if self.record_image:
+	#    for p in self._hough_intersectionPoints_p:
+	#        cv2.circle(self.dst_color, (int(p[0]), int(p[1])), 2, (0, 255, 0), -1)
+	return img
+
 def getGatePose(contour, gate_side):
     '''
     Description: The function takes in gate contour points in counter clockwise direction starting from
@@ -374,29 +492,24 @@ def gate_detection_active_callback(det_active):
     else:
 	pass
 
-
-def detect_gate_type(gate, not_gate, gate_detection_str):
+def detect_gate_type(gate, img):
     global GATE_TYPE_VERTICAL
-    if gate_detection_str == "gate":
-	difference = gate.reshape(3) - not_gate.reshape(3)
-	#print("Difference : {}".format(difference))
-	if (np.linalg.norm(difference) - 1.4) <= 0.2: # Both gates are reliably detected
-	    if not GATE_TYPE_VERTICAL: # gate is horizontal
-		if difference[1] > 0: # gate is left to no_gate
-		    gate_detection_str = "left"
-		else:
-		    gate_detection_str = "right"
-	    else:
-		if difference[2] > 0: # gate is vertical
-		    gate_detection_str = "up"
-		else:
-		    gate_detection_str = "down"
-	else:
-	    pass
+    if not GATE_TYPE_VERTICAL:
+	x,y,w,h = cv2.boundingRect(gate)
+	h_pad = int(0.2*h)
+	w_pad = int(0.2*w)
+	
+	right_x = x + w
+	left_x = x - w
+	if y-h_pad-5 > 0 and y+h_pad+5 < img.shape[0] and x-w_pad-5 > 0 and x+w_pad+5 < img.shape[1]:
+	    left_img = img[y-h_pad:y+h+h_pad, left_x-w_pad:left_x+w+w_pad]
+	    right_img = img[y-h_pad:y+h+h_pad, right_x-w_pad:right_x+w+w_pad]
+	    left_img = getHoughLines(left_img)
+	    right_img = getHoughLines(right_img)
+	    #cv2.imshow("Left", left_img)
+	    #cv2.imshow("Right", right_img)
     else:
 	pass
-
-
 
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, signal_handler)
@@ -432,6 +545,7 @@ if __name__ == '__main__':
     cap = cv2.VideoCapture(0)
     ret, img = cap.read()
     if img is None:
+	#cap.release()
 	cap = cv2.VideoCapture(1)
 	
     cap.set(3, 2560) # Width 2560x720
@@ -463,15 +577,8 @@ if __name__ == '__main__':
 		    cv2.drawContours(img, [gate.reshape(4,2)], 0, (255, 0, 0), 2)
 		    annotateCorners(gate, img)  
 		    raw_euler, raw_tvec = getGatePose(gate, GATE_SIZE)
-		    
-		    #Detect no_gate
-		    no_gate = detect_gate(img, not_gate_hsv_thresh_low, not_gate_hsv_thresh_high, 0)
-		    
-		    #If no_gate is succefully detected
-		    if no_gate is not None and np.array_equal(no_gate.shape, [4,2]):
-			raw_ng_euler, raw_ng_tvec = getGatePose(no_gate, NOT_GATE_SIZE)
-
-			
+		    #img_det = img.copy() 
+		    detect_gate_type(gate, img)
 		    if raw_euler[2] > np.pi or (np.linalg.norm(raw_tvec) > 15): # Outlier rejection
 			gate_detection_string = "no_gate"
 		    else:
@@ -500,9 +607,7 @@ if __name__ == '__main__':
 		KF.filter(U,Y)
 		X = KF.X.copy()
 		
-		# Detect gate type
-		ng_tvec = noGateTvecFilter.update(raw_ng_tvec)
-		detect_gate_type(X, ng_tvec, gate_detection_string)
+
 		#print("X : {}".format(X))
 		# Send messages
 		filtered_gate_WP = array2WP(X, gateHeading, gate_detection_string)
