@@ -80,7 +80,7 @@ BATTERY_THRESH = 20 # Battery threshold for stopping
 orientationFilter = MVA(20)
 translationFilter = MVA(5)
 headingBiasFilter= MVA(20)
-noGateTvecFilter = MVA(20)
+
 
 # Loop Frequency (important for kalman filtering)
 LOOP_FREQ = 60
@@ -256,7 +256,6 @@ def detect_gate(img, hsv_thresh_low, hsv_thresh_high, areaIndex):
 
     # Sort quadrilaterals by area
     quadrlFiltered = sorted(quadrlFiltered, key=lambda x: cv2.contourArea(x))
-
     
     if len(quadrlFiltered) > 0:
         # Get the largest contour
@@ -359,21 +358,220 @@ def gate_detection_active_callback(det_active):
 	GATE_TYPE_VERTICAL = det_active.vertical
 
 
-def detect_gate_type(gate, not_gate, gate_detection_str):
+def getLeftRightProb(img,gate_pnts):
+	scale = 1.4
+
+	TL = np.squeeze(gate_pnts[0:1,:])
+	BL = np.squeeze(gate_pnts[1:2,:])
+	BR = np.squeeze(gate_pnts[2:3,:])
+	TR = np.squeeze(gate_pnts[3:4,:])
+
+	w = max(gate_pnts[:,0:1]) - min(gate_pnts[:,0:1])
+	h = max(gate_pnts[:,1:2]) - min(gate_pnts[:,1:2])
+
+	P_tl = TL + (TL - TR)
+	P_bl = BL + (BL - BR)
+	P_tr = TR + (TR - TL)
+	P_br = BR + (BR - BL)
+
+	circle_width = int(1.5 * (.2*(w+h)/2.0))
+	cv2.circle(img,(P_tl[0], P_tl[1]),circle_width,(0,255,0))
+	cv2.circle(img,(P_tr[0], P_tr[1]),circle_width,(0,255,0))
+	cv2.circle(img,(P_bl[0], P_bl[1]),circle_width,(0,255,0))
+	cv2.circle(img,(P_br[0], P_br[1]),circle_width,(0,255,0))
+
+	cnt_x_L = (TL[0] + BL[0] + P_tl[0] + P_bl[0])/4.0
+	cnt_y_L = (TL[1] + BL[1] + P_tl[1] + P_bl[1])/4.0
+
+	cnt_x_R = (TR[0] + BR[0] + P_tr[0] + P_br[0])/4.0
+	cnt_y_R = (TR[1] + BR[1] + P_tr[1] + P_br[1])/4.0
+
+	# print cnt_x_L
+	# print cnt_x_R
+	# print cnt_y_L
+	# print cnt_y_R
+
+	dim_L = [int(cnt_x_L - .5 * w * scale),int(cnt_x_L + .5 * w * scale),int(cnt_y_L - .5 * h * scale),int(cnt_y_L + .5 * h * scale)]
+	dim_R = [int(cnt_x_R - .5 * w * scale),int(cnt_x_R + .5 * w * scale),int(cnt_y_R - .5 * h * scale),int(cnt_y_R + .5 * h * scale)]
+	
+	imgr = img[dim_R[2]:dim_R[3], dim_R[0]:dim_R[1]]
+	imgl = img[dim_L[2]:dim_L[3], dim_L[0]:dim_L[1]]
+
+	# img_R = np.copy(imgr)
+	# img_L = np.copy(imgl)
+
+	imgr = cv2.GaussianBlur(imgr,(5,5), 5)
+	imgl = cv2.GaussianBlur(imgl,(5,5), 5)
+	
+
+
+	imgr = cv2.erode(imgr, np.ones((3,3), dtype=np.uint8), iterations=1)
+	imgl = cv2.erode(imgl, np.ones((3,3), dtype=np.uint8), iterations=1)
+
+
+	# # Remove blobs
+	# minSize = 10000
+	# # get connectivity data
+	# nb_components, output, stats, centroids = cv2.connectedComponentsWithStats(img, connectivity=8)
+	# nb_components, output, stats, centroids = cv2.connectedComponentsWithStats(img, connectivity=8)
+
+	# # remove background image
+	# stats = stats[1:]; nb_components -= 1
+	# # create return image
+	# img = np.zeros((output.shape), dtype=np.uint8)
+	# # for every component in the image, keep only if it's above minSize
+	# for i in range(nb_components):
+	#    if stats[i,4] >= minSize:
+	# 	   img[output == i + 1] = 255
+
+
+
+	# img = cv2.GaussianBlur(img,(3,3), 3)
+
+	# Canny
+	canny_minVal=50
+	canny_maxVal=250
+	canny_grad=3
+	imgr = cv2.Canny(imgr, canny_minVal, canny_maxVal, None, canny_grad)
+	imgl = cv2.Canny(imgl, canny_minVal, canny_maxVal, None, canny_grad)
+
+
+	imgr = cv2.dilate(imgr, np.ones((3,3), dtype=np.uint8), iterations=1)
+	imgl = cv2.dilate(imgl, np.ones((3,3), dtype=np.uint8), iterations=1)
+
+	
+	# Hough Lines
+	hough_pixelRes=1
+	hough_angleRes=np.pi/180.
+	hough_minNumIntersections=150
+	hough_minLineLength=50
+	hough_maxLineGap=20
+	hough_lineExtension=25.0
+
+
+
+	linesR = cv2.HoughLinesP(imgr, hough_pixelRes, hough_angleRes, hough_minNumIntersections, None, hough_minLineLength, hough_maxLineGap)
+	linesL = cv2.HoughLinesP(imgl, hough_pixelRes, hough_angleRes, hough_minNumIntersections, None, hough_minLineLength, hough_maxLineGap)
+	
+	theta_accept = 15
+
+	theta_min = theta_accept * np.pi/180.
+	theta_max = (90-theta_accept) * np.pi/180.
+
+
+	# if linesR is not None:
+	# 	for i in range(0, len(linesR)):
+	# 		l = linesR[i][0]
+	# 		theta = math.atan(abs(l[3]-float(l[1]))/abs(float(l[2])-l[0]))
+	# 		if theta < theta_min or theta > theta_max:
+	# 			cv2.line(img_R, (l[0], l[1]), (l[2], l[3]), (0,0,255), 1, cv2.LINE_AA)
+
+	# if linesL is not None:
+	# 	for i in range(0, len(linesL)):
+	# 		l = linesL[i][0]
+	# 		theta = math.atan(abs(l[3]-float(l[1]))/abs(float(l[2])-l[0]))
+	# 		if theta < theta_min or theta > theta_max:
+	# 			cv2.line(img_L, (l[0], l[1]), (l[2], l[3]), (0,0,255), 1, cv2.LINE_AA)
+
+
+	P_tl = P_tl - [dim_L[0],dim_L[2]]
+	P_bl = P_bl - [dim_L[0],dim_L[2]]
+	# cv2.circle(img_L,(P_tl[0], P_tl[1]),20,(0,0,255))
+	# cv2.circle(img_L,(P_bl[0], P_bl[1]),20,(0,0,255))
+	
+	P_tr = P_tr - [dim_R[0],dim_R[2]]
+	P_br = P_br - [dim_R[0],dim_R[2]]
+	# cv2.circle(img_R,(P_tr[0], P_tr[1]),20,(0,0,255))
+	# cv2.circle(img_R,(P_br[0], P_br[1]),20,(0,0,255))
+
+
+	squeez = np.squeeze(linesR)
+
+	dx = 1.0 * np.absolute(squeez[:,3] - squeez[:,1])
+	dy = 1.0 * np.absolute(squeez[:,2] - squeez[:,0])
+	dydx = dx / dy
+
+	theta_vec = np.arctan(dydx)
+
+	ba1 = theta_vec < theta_min
+	ba2 = theta_vec > theta_max
+	squeez = squeez[ba1 | ba2,:]
+
+	pnts = squeez[:,0:2]
+	pnts = np.concatenate((pnts,squeez[:,2:4]), axis=0)
+	
+	# for a in pnts:
+		# cv2.circle(img_R,(a[0], a[1]),2,(0,255,0))
+
+	dtr = P_tr-pnts
+	dbr = P_br-pnts
+
+	dist_tr = np.linalg.norm(dtr,axis=1)
+	dist_br = np.linalg.norm(dbr,axis=1)
+		
+	sum_tr = sum(np.maximum(2 * circle_width - dist_tr,0))
+	sum_br = sum(np.maximum(2 * circle_width - dist_br,0))
+	
+	right_sum = sum_tr*sum_br
+
+	# print 'Right_sum: ',right_sum
+
+
+	squeez = np.squeeze(linesL)
+	
+	dx = 1.0 * np.absolute(squeez[:,3] - squeez[:,1])
+	dy = 1.0 * np.absolute(squeez[:,2] - squeez[:,0])
+	dydx = dx / dy
+
+	theta_vec = np.arctan(dydx)
+
+	ba1 = theta_vec < theta_min
+	ba2 = theta_vec > theta_max
+	squeez = squeez[ba1 | ba2,:]
+
+	pnts = squeez[:,0:2]
+	pnts = np.concatenate((pnts,squeez[:,2:4]), axis=0)
+	
+	# for a in pnts:
+		# cv2.circle(img_L,(a[0], a[1]),2,(0,255,0))
+
+	dtl = P_tl-pnts
+	dbl = P_bl-pnts
+
+	dist_tl = np.linalg.norm(dtl,axis=1)
+	dist_bl = np.linalg.norm(dbl,axis=1)
+		
+	sum_tl = sum(np.maximum(2 * circle_width - dist_tl,0))
+	sum_bl = sum(np.maximum(2 * circle_width - dist_bl,0))
+	
+	left_sum = sum_tl*sum_bl
+
+	# print 'Left_sum: ',left_sum
+
+	left_sum = left_sum / (left_sum+right_sum)
+	right_sum = 1.0 - left_sum
+
+
+	# return img_R, img_L
+	return left_sum, right_sum
+
+
+def detect_gate_type(img, gate):
 	global GATE_TYPE_VERTICAL
-	if gate_detection_str == "gate":
-		difference = gate - not_gate
-		if (np.linalg.norm(difference) - 1.4) <= 0.2: # Both gates are reliably detected
-			if not GATE_TYPE_VERTICAL: # gate is horizontal
-				if difference[1] > 0: # gate is left to no_gate
-					gate_detection_str = "left"
-				else:
-					gate_detection_str = "right"
-			else:
-				if difference[2] > 0: # gate is vertical
-					gate_detection_str = "up"
-				else:
-					gate_detection_str = "down"
+	if not GATE_TYPE_VERTICAL:	# Gate is horizontal
+		left, right = getLeftRightProb(img, gate)
+		if left > right:
+			return "left"
+		else:
+			return "right"
+	else:
+		#up, down = getUpDownProb(img, gate)
+		#if up > down:
+			#return "up"
+		#else:
+			#return "down"
+		return "gate"
+		pass
 
 
 
@@ -425,20 +623,17 @@ if __name__ == '__main__':
 				
 				# Gate detection           
 				gate = detect_gate(img, hsv_thresh_low, hsv_thresh_high, -1)
-				not_gate = detect_gate(img, not_gate_hsv_thresh_low, not_gate_hsv_thresh_high, 0)
 				
 				# If gate detected succesfully
 				if gate is not None and np.array_equal(gate.shape, [4,2]):
 					cv2.drawContours(img, [gate.reshape(4,2)], 0, (255, 0, 0), 2)
 					annotateCorners(gate, img)  
 					raw_euler, raw_tvec = getGatePose(gate, GATE_SIZE)
-					raw_ng_euler, raw_ng_tvec = getGatePose(gate, GATE_SIZE)
-					ng_tvec = noGateTvecFilter.update(raw_ng_tvec)
 					
 					if raw_euler[2] > np.pi or (np.linalg.norm(raw_tvec) > 30): # Outlier rejection
 						gate_detection_string = "no_gate"
 					else:
-						gate_detection_string = "gate"                   
+						gate_detection_string = detect_gate_type(img, gate)                 
 				else:
 					gate_detection_string = "no_gate"
 					
@@ -452,29 +647,26 @@ if __name__ == '__main__':
 				# Kalman Filtering
 				euler = orientationFilter.update(raw_euler)         
 				gateHeading = filterHeading(euler[2], drone_orientation[2])
-		
+				
 				mva_tvec = translationFilter.update(raw_tvec)
 				
 				Y = mva_tvec.reshape((3,1))
-				U = np.matmul( tfs.rotation_matrix(gateHeading, (0,0,1))[:3,:3], drone_linear_vel.reshape((3,1)) )
+				U = drone_linear_vel.reshape((3,1))
 				KF.dt = (time() - start)
 				start = time()
 				KF.filter(U,Y)
 				X = KF.X.copy()
-				
-				# Detect gate type
-				gate_type = detect_gate_type(X, ng_tvec, gate_detection_string)
 				
 				# Send messages
 				filtered_gate_WP = array2WP(X, gateHeading, gate_detection_string)
 				gate_WP = array2WP(raw_tvec, raw_euler[2], "")
 				gate_pose_pub.publish(gate_WP)
 				filtered_gate_pose_pub.publish(filtered_gate_WP) 
-				
-			else:
-				pass
-            rospy.loginfo("LOOP Frequency: {} Hz".format(1/(time() - start)))
-            #img = cv2.resize(img, None, fx=0.25, fy=0.25)   
-            image_publisher.publish(bridge.cv2_to_imgmsg(img,"bgr8"))
+				rospy.loginfo("LOOP Frequency: {} Hz".format(1/(KF.dt)))
+				#img = cv2.resize(img, None, fx=0.25, fy=0.25)   
+				image_publisher.publish(bridge.cv2_to_imgmsg(img,"bgr8"))
+		else:
+			pass
+            
 
             
