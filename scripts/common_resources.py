@@ -88,6 +88,7 @@ def quat2euler(q):
 	pitch = np.arcsin( 2*(q[3]*q[1] - q[0]*q[2]) )
 	yaw = np.arctan2( 2*(q[3]*q[2] + q[0]*q[1]), 1 - 2*(q[1]**2 + q[2]**2) )
 	return np.array([roll,pitch,yaw])
+
 	
 # Convert euler angles to quaternion (angles in radians)
 def euler2quat(euler): # euler = [roll (X), pitch (Y), yaw (Z)]
@@ -114,18 +115,6 @@ def qv_mult(q1, v1):
 	return tfs.quaternion_multiply(tfs.quaternion_multiply(q1, q2), tfs.quaternion_conjugate(q1))[:3]
 
 
-'''
-# transform axis angle representation into quaternian
-def axang2quat(vector):
-	l = np.linalg.norm(vector)
-	s = math.sin(l / 2)
-	x = vector[0] / l * s
-	y = vector[1] / l * s
-	z = vector[2] / l * s
-	w = math.cos(l / 2)
-	return np.array([x, y, z, w])
-'''
-
 # Convert rotation vector to quaternion	
 def rvec2quat(vector):
 	theta = np.linalg.norm(vector)
@@ -136,6 +125,7 @@ def rvec2quat(vector):
 	z = unit_vector[2] * sin_th_by_2
 	w = math.cos(theta/2)
 	return np.array([x, y, z, w])
+
 
 # find an average of a list of waypoints in position and heading
 def find_average(latest_gates):
@@ -183,6 +173,8 @@ def limit_value(value, limit):
 	else:
 		return value
 
+
+# wrap values from -pi to pi
 def wrap2pi(theta):
 	while theta > np.pi or theta <= -np.pi:
 		if theta > np.pi:
@@ -190,6 +182,7 @@ def wrap2pi(theta):
 		elif theta <= -np.pi:
 			theta = 2 * np.pi + theta
 	return theta
+
 
 # Kalman Filter
 class KalmanFilter: 
@@ -228,6 +221,7 @@ class KalmanFilter:
 	self.predict(U)
 	self.update(Y)
 	
+
 # Extended Kalman Filter
 class ExtendedKalmanFilter(KalmanFilter):
   def __init__(self, predictFunc, jacobianA, jacobianB, C, Q, R, X0, dt=1):
@@ -269,7 +263,6 @@ class MVA:
 			return self.filtered
 
 	
-
 # waypoint class with position and hdg as well as a string function
 class WP:
 	def __init__(self, pos, hdg):
@@ -280,8 +273,9 @@ class WP:
 		return str(list(self.pos) + [self.hdg])
 
 
+
 class Gate:
-	def __init__(self,gate_format,center_pos,hdg):
+	def __init__(self,gate_format,center_pos,hdg,look_dist,exit_dist):
 
 
 		self.pos = WP(np.array(center_pos),None)
@@ -290,42 +284,59 @@ class Gate:
 		self.format = gate_format
 		self.on_gate = None
 
-		self.look_pos = WP(self.pos.pos - 5.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
-		self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
+		self.look_dist = look_dist
+		self.exit_dist = exit_dist
+
+		self.look_pos = WP(self.pos.pos - self.look_dist * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
+		self.exit_pos = WP(self.pos.pos + self.exit_dist * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
 
 
 	def reset(self):
-		self.pos = self.org_pos
+		self.pos.pos = self.org_pos.pos
 		self.on_gate = None
-		self.look_pos = WP(self.org_pos.pos - 5.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
-		self.exit_pos = WP(self.org_pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
+		self.look_pos.pos = self.org_pos.pos - self.look_dist * np.array([math.cos(self.hdg),math.sin(self.hdg),0])
+		self.exit_pos.pos = self.org_pos.pos + self.exit_dist * np.array([math.cos(self.hdg),math.sin(self.hdg),0])
 
 		
 	def update_format(self,gate_format):
 
-		if self.format == 'vertical' and gate_format == 'top':
+		if self.format == 'vertical' and gate_format == 'up':
 			self.on_gate = gate_format
-			self.pos = self.org_pos + np.array([0,0,.7])
-			self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
-		
+			self.pos.pos = self.org_pos.pos + np.array([0,0,.7])
+			self.exit_pos.pos = self.pos.pos + self.exit_dist * np.array([math.cos(self.hdg),math.sin(self.hdg),0])
+			rospy.loginfo('updating position to top gate')
+			rospy.loginfo(str(self.org_pos.pos))
+			rospy.loginfo(str(self.pos.pos))
+			rospy.loginfo(str(self.exit_pos.pos))
 
-		elif self.format == 'vertical' and gate_format == 'bottom':
+		elif self.format == 'vertical' and gate_format == 'down':
 			self.on_gate = gate_format
-			self.pos = self.org_pos - np.array([0,0,.7])
-			self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
+			self.pos.pos = self.org_pos.pos + np.array([0,0,-.7])
+			self.exit_pos.pos = self.pos.pos + self.exit_dist * np.array([math.cos(self.hdg),math.sin(self.hdg),0])
+			rospy.loginfo('updating position to bottom gate')
+			rospy.loginfo(str(self.org_pos.pos))
+			rospy.loginfo(str(self.pos.pos))
+			rospy.loginfo(str(self.exit_pos.pos))
 
 
 		elif self.format == 'horizontal' and gate_format == 'left':
 			self.on_gate = gate_format
-			self.pos = self.org_pos + np.array([0.7,0.0,0.0])
-			self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
+			self.pos.pos = self.org_pos.pos + np.array([0.7,0.0,0.0])
+			self.exit_pos.pos = self.pos.pos + self.exit_dist * np.array([math.cos(self.hdg),math.sin(self.hdg),0])
+			rospy.loginfo('updating position to left gate')
+			rospy.loginfo(str(self.org_pos.pos))
+			rospy.loginfo(str(self.pos.pos))
+			rospy.loginfo(str(self.exit_pos.pos))
 
 
 		elif self.format == 'horizontal' and gate_format == 'right':
 			self.on_gate = gate_format
-			self.pos = self.org_pos - np.array([0.7,0.0,0.0])
-			self.exit_pos = WP(self.pos.pos + 20.0 * np.array([math.cos(self.hdg),math.sin(self.hdg),0]),None)
-	
+			self.pos.pos = self.org_pos.pos + np.array([-0.7,0.0,0.0])
+			self.exit_pos.pos = self.pos.pos + self.exit_dist * np.array([math.cos(self.hdg),math.sin(self.hdg),0])
+			rospy.loginfo('updating position to right gate')
+			rospy.loginfo(str(self.org_pos.pos))
+			rospy.loginfo(str(self.pos.pos))
+			rospy.loginfo(str(self.exit_pos.pos))
 	
 
 
