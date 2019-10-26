@@ -50,8 +50,8 @@ ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
 SOLIDITY_THRESH = 0.90
 ROI_MEAN_THRESH = 130
 
-DETECTION_ACTIVE = False
-GATE_TYPE_VERTICAL = True
+DETECTION_ACTIVE = True
+GATE_TYPE_VERTICAL = False
 NO_GATE_DETECTION = True
 
 ########################################################################
@@ -350,28 +350,28 @@ def gate_detection_active_callback(det_active):
     GATE_TYPE_VERTICAL = det_active.vertical.data
     
     if det_active.gate_num == 1:
-	# HSV thresholds for LED gate
-	hsv_thresh_low = (0, 0, 240)
-	hsv_thresh_high = (180, 255, 255)
+		# HSV thresholds for LED gate
+		hsv_thresh_low = (0, 0, 240)
+		hsv_thresh_high = (180, 255, 255)
 
-	# Gate thresholds
-	AREA_THRESH = 2000
-	ASPECT_RATIO_THRESH_LOW = 0.5 # Should be between 0.0 and 1.0
-	ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
-	ROI_MEAN_THRESH = 100
+		# Gate thresholds
+		AREA_THRESH = 2000
+		ASPECT_RATIO_THRESH_LOW = 0.5 # Should be between 0.0 and 1.0
+		ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
+		ROI_MEAN_THRESH = 100
 	
     elif det_active.gate_num == 2:
-	# HSV thresholds for LED gate
-	hsv_thresh_low = (0, 0, 200)
-	hsv_thresh_high = (180, 255, 255)
+		# HSV thresholds for LED gate
+		hsv_thresh_low = (0, 0, 200)
+		hsv_thresh_high = (180, 255, 255)
 
-	# Gate thresholds
-	AREA_THRESH = 5000
-	ASPECT_RATIO_THRESH_LOW = 0.8 # Should be between 0.0 and 1.0
-	ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
-	ROI_MEAN_THRESH = 150
+		# Gate thresholds
+		AREA_THRESH = 5000
+		ASPECT_RATIO_THRESH_LOW = 0.8 # Should be between 0.0 and 1.0
+		ASPECT_RATIO_THRESH_HIGH = 1/ASPECT_RATIO_THRESH_LOW
+		ROI_MEAN_THRESH = 150
     else:
-	pass
+		pass
 
 
 def getLeftRightProb(img,gate_pnts):
@@ -409,6 +409,15 @@ def getLeftRightProb(img,gate_pnts):
 
 	dim_L = [int(cnt_x_L - .5 * w * scale),int(cnt_x_L + .5 * w * scale),int(cnt_y_L - .5 * h * scale),int(cnt_y_L + .5 * h * scale)]
 	dim_R = [int(cnt_x_R - .5 * w * scale),int(cnt_x_R + .5 * w * scale),int(cnt_y_R - .5 * h * scale),int(cnt_y_R + .5 * h * scale)]
+	
+	dim_R[0] = max(0, dim_R[0])
+	dim_R[2] = max(0, dim_R[2])
+	dim_L[0] = max(0, dim_L[0])
+	dim_L[2] = max(0, dim_L[2])
+	dim_R[3] = max(img.shape[0]-1, dim_R[3])
+	dim_R[1] = max(img.shape[1]-1, dim_R[1])
+	dim_L[3] = max(img.shape[0]-1, dim_L[3])
+	dim_L[1] = max(img.shape[1]-1, dim_L[1])
 	
 	imgr = img[dim_R[2]:dim_R[3], dim_R[0]:dim_R[1]]
 	imgl = img[dim_L[2]:dim_L[3], dim_L[0]:dim_L[1]]
@@ -451,10 +460,8 @@ def getLeftRightProb(img,gate_pnts):
 	imgr = cv2.Canny(imgr, canny_minVal, canny_maxVal, None, canny_grad)
 	imgl = cv2.Canny(imgl, canny_minVal, canny_maxVal, None, canny_grad)
 
-
 	imgr = cv2.dilate(imgr, np.ones((3,3), dtype=np.uint8), iterations=1)
 	imgl = cv2.dilate(imgl, np.ones((3,3), dtype=np.uint8), iterations=1)
-
 	
 	# Hough Lines
 	hough_pixelRes=1
@@ -463,8 +470,6 @@ def getLeftRightProb(img,gate_pnts):
 	hough_minLineLength=50
 	hough_maxLineGap=20
 	hough_lineExtension=25.0
-
-
 
 	linesR = cv2.HoughLinesP(imgr, hough_pixelRes, hough_angleRes, hough_minNumIntersections, None, hough_minLineLength, hough_maxLineGap)
 	linesL = cv2.HoughLinesP(imgl, hough_pixelRes, hough_angleRes, hough_minNumIntersections, None, hough_minLineLength, hough_maxLineGap)
@@ -564,7 +569,7 @@ def getLeftRightProb(img,gate_pnts):
 
 	# print 'Left_sum: ',left_sum
 
-	left_sum = left_sum / (left_sum+right_sum)
+	left_sum = left_sum / (left_sum + right_sum)
 	right_sum = 1.0 - left_sum
 
 
@@ -580,7 +585,7 @@ def detect_gate_type(img, gate):
 			return "left"
 		else:
 			return "right"
-	else:
+	else:	# Gate is vertical
 		#up, down = getUpDownProb(img, gate)
 		#if up > down:
 			#return "up"
@@ -626,8 +631,8 @@ if __name__ == '__main__':
     cap = cv2.VideoCapture(0)
     ret, img = cap.read()
     if img is None:
-	cap = cv2.VideoCapture(1)
-	
+		cap = cv2.VideoCapture(1)
+
     cap.set(3, 2560) # Width 2560x720
     cap.set(4, 720) # Height
     cap.set(5, 60) # FPS
@@ -637,7 +642,6 @@ if __name__ == '__main__':
 
     gate_detection_string = "no_gate"
     mva_tvec = np.zeros(3, float)
-    raw_ng_tvec = np.zeros(3, float)
     start = time()
     
     while not rospy.is_shutdown():

@@ -1351,9 +1351,12 @@ if __name__ == '__main__':
     
     rate = rospy.Rate(loop_rate)
     while not rospy.is_shutdown():
-		rospy.loginfo('Controller Loop')
-		update_pose_estimate()
-		update_controller()
+		if autonomy_active:
+			rospy.loginfo('Controller Loop')
+			update_pose_estimate()
+			update_controller()
+		else:
+			pass
 		rate.sleep()
         
 
