@@ -635,7 +635,6 @@ def callback_visual_gate_detection_changed(data):
 
 
             publisher_visual_log.publish(log_array)
-
         
 
 
@@ -966,21 +965,31 @@ class State:
         global nav_active
         nav_active = self.nav_active
 
+
+
         # set detection to on/off
         global detection_active
+        global estimate_vertical_gate
+        global estimate_horizontal_gate
+        
         detection_active = self.detection_active
 
-        
         detection_msg = Detection_Active()
-
         detection_msg.active.data = self.detection_active
 
         if self.detection_active:
-            detection_msg.vertical.data = bool(self.current_gate.format == 'vertical')
+            vert = bool(self.current_gate.format == 'vertical')
+            detection_msg.vertical.data = vert
 
+            if vert and estimate_vertical_gate:
+                detection_msg.choose.data = True
+
+            if not vert and estimate_horizontal_gate:
+                detection_msg.choose.data = True
+    
         publisher_gate_detection.publish(detection_msg)
 
-
+        
 
         # Initialize current gate to gate found
         if self.current_gate is not None:
@@ -1096,8 +1105,6 @@ if __name__ == '__main__':
     
 
     bebop_model = cr.Bebop_Model(start_pos,start_hdg)           # Initialize odometry message to store position
-
-
 
 
 
@@ -1330,7 +1337,7 @@ if __name__ == '__main__':
 
     
     while bebop_odometry is None:
-        time.sleep(.5)
+        time.sleep(.25)
 
 
     rospy.loginfo("Odometry recieved")
@@ -1351,12 +1358,14 @@ if __name__ == '__main__':
     
     rate = rospy.Rate(loop_rate)
     while not rospy.is_shutdown():
-		if autonomy_active:
+		
+        if autonomy_active:
 			rospy.loginfo('Controller Loop')
 			update_pose_estimate()
 			update_controller()
 		else:
 			pass
+
 		rate.sleep()
         
 
