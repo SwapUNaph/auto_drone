@@ -304,39 +304,39 @@ class Gate:
 			self.on_gate = gate_format
 			self.pos.pos = self.org_pos.pos + np.array([0,0,.7])
 			self.exit_pos.pos = self.pos.pos + self.exit_dist * np.array([math.cos(self.hdg),math.sin(self.hdg),0])
-			rospy.loginfo('updating position to top gate')
-			rospy.loginfo(str(self.org_pos.pos))
-			rospy.loginfo(str(self.pos.pos))
-			rospy.loginfo(str(self.exit_pos.pos))
+			print 'updating position to top gate'
+			print self.org_pos.pos
+			print self.pos.pos
+			print self.exit_pos.pos
 
 		elif self.format == 'vertical' and gate_format == 'down':
 			self.on_gate = gate_format
 			self.pos.pos = self.org_pos.pos + np.array([0,0,-.7])
 			self.exit_pos.pos = self.pos.pos + self.exit_dist * np.array([math.cos(self.hdg),math.sin(self.hdg),0])
-			rospy.loginfo('updating position to bottom gate')
-			rospy.loginfo(str(self.org_pos.pos))
-			rospy.loginfo(str(self.pos.pos))
-			rospy.loginfo(str(self.exit_pos.pos))
+			print 'updating position to bottom gate'
+			print self.org_pos.pos
+			print self.pos.pos
+			print self.exit_pos.pos
 
 
 		elif self.format == 'horizontal' and gate_format == 'left':
 			self.on_gate = gate_format
 			self.pos.pos = self.org_pos.pos + np.array([0.7,0.0,0.0])
 			self.exit_pos.pos = self.pos.pos + self.exit_dist * np.array([math.cos(self.hdg),math.sin(self.hdg),0])
-			rospy.loginfo('updating position to left gate')
-			rospy.loginfo(str(self.org_pos.pos))
-			rospy.loginfo(str(self.pos.pos))
-			rospy.loginfo(str(self.exit_pos.pos))
+			print 'updating position to left gate'
+			print self.org_pos.pos
+			print self.pos.pos
+			print self.exit_pos.pos
 
 
 		elif self.format == 'horizontal' and gate_format == 'right':
 			self.on_gate = gate_format
 			self.pos.pos = self.org_pos.pos + np.array([-0.7,0.0,0.0])
 			self.exit_pos.pos = self.pos.pos + self.exit_dist * np.array([math.cos(self.hdg),math.sin(self.hdg),0])
-			rospy.loginfo('updating position to right gate')
-			rospy.loginfo(str(self.org_pos.pos))
-			rospy.loginfo(str(self.pos.pos))
-			rospy.loginfo(str(self.exit_pos.pos))
+			print 'updating position to right gate'
+			print self.org_pos.pos
+			print self.pos.pos
+			print self.exit_pos.pos
 	
 
 
