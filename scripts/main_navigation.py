@@ -486,11 +486,12 @@ def callback_visual_gate_detection_changed(data):
 	global gate_detected
 	global gate_log
 	global std_gate_thres
-
+	
 
 	if not detection_active:
 		rospy.loginfo('Detection not supposed to be active, exiting visual_callback')
-
+		return
+	
 	if len(data.format) == 0:
 		pass
 
@@ -502,8 +503,8 @@ def callback_visual_gate_detection_changed(data):
 		if current_gate is not None:
 			
 			# print current_gate
-			print current_gate.format
-			print current_gate.on_gate
+			# print current_gate.format
+			# print current_gate.on_gate
 
 			if current_gate.on_gate is None:
 
@@ -561,7 +562,7 @@ def callback_visual_gate_detection_changed(data):
 		pos_calc = bebop_model.pos + gate_proj
 		
 
-		if len(gate_log) < 9:
+		if len(gate_log) < 10:
 			gate_log.append(pos_calc)
 
 		else:
@@ -925,15 +926,16 @@ def update_controller():
 class State:
 	# This is the ominous state machine
 	def __init__(self, own_state=None, next_state=None, condition_type=None, condition_thres=None,
-				 exit_clear_visual=None, exit_clear_gate=None, detection_active_bool=None, nav_active_str=None,
+				 exit_clear_visual=None, exit_clear_gate=None, detection_active_bool=None, choose_active_bool=None, nav_active_str=None,
 				 gate_color=None, fly=None, look=None, gate_current=None):
 		self.own_state = own_state                              # own state id
 		self.next_state = next_state                            # next state id
 		self.condition_type = condition_type                    # type of state advancement
 		self.condition_thres = condition_thres                  # value for state advancement (not req. for all)
 		self.exit_clear_visual = bool(exit_clear_visual)        # on state exit, clear all visual data? (new gate)
-		self.exit_clear_gate = bool(exit_clear_gate)          # on state exit, reset current gate
+		self.exit_clear_gate = bool(exit_clear_gate)            # on state exit, reset current gate
 		self.detection_active = bool(detection_active_bool)     # detection active?
+		self.choose_active = bool(choose_active_bool)     		# detection active?
 		self.nav_active = nav_active_str                        # which navigation should be active
 		self.gate_color = gate_color                            # color of the gate
 		self.fly = fly                                          # if blind waypoint should be calculated: offset for
@@ -968,7 +970,7 @@ class State:
 		global nav_active
 		nav_active = self.nav_active
 
-
+		
 
 		# set detection to on/off
 		global detection_active
@@ -981,19 +983,9 @@ class State:
 		detection_msg.active.data = self.detection_active
 
 		if self.detection_active:
-			vert = bool(self.current_gate.format == 'vertical')
-			detection_msg.vertical.data = vert
-
-			if vert and estimate_vertical_gate:
-				detection_msg.choose.data = True
-			else:
-				detection_msg.choose.data = False
-
-			if not vert and estimate_horizontal_gate:
-				detection_msg.choose.data = True
-			else:
-				detection_msg.choose.data = False
-
+			detection_msg.vertical.data = bool(self.current_gate.format == 'vertical')
+			detection_msg.choose.data = self.choose_active
+			
 		publisher_gate_detection.publish(detection_msg)
 
 
@@ -1277,66 +1269,70 @@ if __name__ == '__main__':
 	states = [State()] * 100
 
 	# states[02] = State(02, 03, "bebop", cr.Bebop.TAKEOFF,  0, 0, 0, b, None, None, None, None)                                                        # Landed
-	states[03] = State(03, 04, "bebop", cr.Bebop.HOVERING, 0, 0, 0, b, None, None, None, None)                                                          # Taking off
-	states[04] = State(04, 10, "time",  1.0,               0, 0, 0, o, None, None, None, None)                                                          # Hovering
+	states[03] = State(03, 04, "bebop", cr.Bebop.HOVERING, 0, 0, 0, 0, b, None, None, None, None)                                                          # Taking off
+	states[04] = State(04, 10, "time",  1.0,               0, 0, 0, 0, o, None, None, None, None)                                                          # Hovering
 
 
 	
 	# Forward and backwards testing
-	states[10]  = State(10, 11,  "dist",  1.0,            0, 0, 0, t, None,   gate_1.pos,        gate_1.pos,        gate_1)                               # testing 
-	states[11]  = State(11, 10, "dist",  1.0,            0, 0, 0, p, None,   gate_1.exit_pos,   gate_1.exit_pos,   None)                                 # testing 
+	# states[10]  = State(10, 11,  "dist",  1.0,            0, 0, 0, t, None,   gate_1.pos,        gate_1.pos,        gate_1)                               # testing 
+	# states[11]  = State(11, 10, "dist",  1.0,            0, 0, 0, p, None,   gate_1.exit_pos,   gate_1.exit_pos,   None)                                 # testing 
 
 
 	# One gate pass testings
-	states[13] = State(13, 14, "dist",  dist_gate_blind,   0, 0, 0, p, None,           gate_1.look_pos,        gate_1.pos,         None)                # Move and Look for gate
-	states[14] = State(14, 15, "wp",    None,              0, 0, h, p, gate_params1,   gate_1.look_pos,        gate_1.pos,         gate_1)              # Move and Look for gate
-	states[15] = State(15, 16, "dist",  dist_gate_close,   1, 0, h, t, gate_params1,   gate_1.pos,             gate_1.pos,         gate_1)              # move through gate until cant see it
-	states[16] = State(16, 98, "dist",  exit_thrs,         0, 1, 0, p, None,           gate_1.exit_pos,        gate_1.exit_pos,    None)                # Move through gate
-	states[17] = State(17, 98, "dist",  dist_gate_blind,   0, 0, 0, p, None,           turn_pos_1,             gate_2.pos,         None)                # Turn around manuever
+	states[13] = State(13, 14, "dist",  dist_gate_blind,   0, 0, 0, 0, p, None,           gate_1.look_pos,        gate_1.pos,         None)                # Move and Look for gate
+	states[14] = State(14, 15, "wp",    None,              0, 0, 1, 0, p, gate_params1,   gate_1.look_pos,        gate_1.pos,         gate_1)              # Move and Look for gate
+	states[15] = State(15, 16, "dist",  dist_gate_close,   1, 0, 1, 0, t, gate_params1,   gate_1.pos,             gate_1.pos,         gate_1)              # move through gate until cant see it
+	states[16] = State(16, 98, "dist",  exit_thrs,         0, 1, 0, 0, p, None,           gate_1.exit_pos,        gate_1.exit_pos,    None)                # Move through gate
+	states[17] = State(17, 98, "dist",  dist_gate_blind,   0, 0, 0, 0, p, None,           turn_pos_1,             gate_2.pos,         None)                # Turn around manuever
 
 	
 	# Gate 2 Pass
-	states[20] = State(20, 21, "dist",  dist_gate_blind,   0, 0, 0, p, None,           gate_2.look_pos,        gate_2.pos,         None)                # Move and Look for gate
-	states[21] = State(21, 22, "wp",    None,              0, 0, h, p, gate_params1,   gate_2.look_pos,        gate_2.pos,         gate_2)              # Move and Look for gate
-	states[22] = State(22, 23, "dist",  dist_gate_close,   1, 0, h, t, gate_params1,   gate_2.pos,             gate_2.pos,         gate_2)              # move through gate until cant see it
-	states[23] = State(23, 98, "dist",  exit_thrs,         0, 1, 0, p, None,           gate_2.exit_pos,        gate_2.exit_pos,    None)                # Move through gate
+	states[20] = State(20, 21, "dist",  dist_gate_blind,   0, 0, 0, 0, p, None,           gate_2.look_pos,        gate_2.pos,         None)                # Move and Look for gate
+	states[21] = State(21, 22, "wp",    None,              0, 0, 1, 0, p, gate_params1,   gate_2.look_pos,        gate_2.pos,         gate_2)              # Move and Look for gate
+	states[22] = State(22, 23, "dist",  dist_gate_close,   1, 0, 1, 0, t, gate_params1,   gate_2.pos,             gate_2.pos,         gate_2)              # move through gate until cant see it
+	states[23] = State(23, 98, "dist",  exit_thrs,         0, 1, 0, 0, p, None,           gate_2.exit_pos,        gate_2.exit_pos,    None)                # Move through gate
 	
 
 
 
 	# Mini course
-	states[29] = State(29, 30, "dist",  dist_gate_blind,   0, 0, 0, p, None,           gate_1_test.look_pos,        gate_1_test.pos,         None)                # Move and Look for gate
+	states[29] = State(29, 30, "dist",  dist_gate_blind,   0, 0, 0, 0, p, None,           gate_1_test.look_pos,        gate_1_test.pos,         None)                # Move and Look for gate
 	
-	states[30] = State(30, 31, "wp",    None,              0, 0, v, p, gate_params1,   gate_1_test.look_pos,        gate_1_test.pos,         gate_1_test)              # Move and Look for gate
-	states[31] = State(31, 32, "dist",  dist_gate_close,   1, 0, v, t, gate_params1,   gate_1_test.pos,             gate_1_test.pos,         gate_1_test)              # move through gate until cant see it
-	states[32] = State(32, 33, "dist",  exit_thrs,         0, 1, 0, p, None,           gate_1_test.exit_pos,        gate_1_test.exit_pos,    None)                # Move through gate
-	states[33] = State(33, 40, "dist",  dist_gate_blind,   0, 0, 0, p, None,           turn_pos_1_test,             gate_2_test.pos,         None)                # Turn around manuever
+	states[30] = State(30, 31, "wp",    None,              0, 0, 1, 0, p, gate_params1,   gate_1_test.look_pos,        gate_1_test.pos,         gate_1_test)              # Move and Look for gate
+	states[31] = State(31, 32, "dist",  dist_gate_close,   1, 0, 1, 0, t, gate_params1,   gate_1_test.pos,             gate_1_test.pos,         gate_1_test)              # move through gate until cant see it
+	states[32] = State(32, 33, "dist",  exit_thrs,         0, 1, 0, 0, p, None,           gate_1_test.exit_pos,        gate_1_test.exit_pos,    None)                # Move through gate
+	states[33] = State(33, 40, "dist",  dist_gate_blind,   0, 0, 0, 0, p, None,           turn_pos_1_test,             gate_2_test.pos,         None)                # Turn around manuever
 
 
-	states[40] = State(40, 41, "wp",    None,              0, 0, v, p, gate_params2,   gate_2_test.look_pos,        gate_2_test.pos,         gate_2_test)              # Move and Look for gate
-	states[41] = State(41, 42, "dist",  dist_gate_close,   1, 0, v, t, gate_params2,   gate_2_test.pos,             gate_2_test.pos,         gate_2_test)              # move through gate until cant see it
-	states[42] = State(42, 43, "dist",  exit_thrs,         0, 1, 0, p, None,           gate_2_test.exit_pos,        gate_2_test.exit_pos,    None)                # Move through gate
-	states[43] = State(43, 30, "dist",  dist_gate_blind,   0, 0, 0, p, None,           turn_pos_2_test,             gate_1_test.pos,         None)                # Turn around manuever
-
+	states[40] = State(40, 41, "wp",    None,              0, 0, 1, 0, p, gate_params2,   gate_2_test.look_pos,        gate_2_test.pos,         gate_2_test)              # Move and Look for gate
+	states[41] = State(41, 42, "dist",  dist_gate_close,   1, 0, 1, 0, t, gate_params2,   gate_2_test.pos,             gate_2_test.pos,         gate_2_test)              # move through gate until cant see it
+	states[42] = State(42, 43, "dist",  exit_thrs,         0, 1, 0, 0, p, None,           gate_2_test.exit_pos,        gate_2_test.exit_pos,    None)                # Move through gate
+	states[43] = State(43, 30, "dist",  dist_gate_blind,   0, 0, 0, 0, p, None,           turn_pos_2_test,             gate_1_test.pos,         None)                # Turn around manuever
+	
 
 
 	
 	# Full Gate test passes
-	# states[70] = State(70, 71, "dist",  dist_gate_blind,   0, 0, p, None, [1.7, 0, 0], [5.0, 0, 0])               
-	# states[71] = State(71, 72, "wp",    None,              0, 1, p, gate_params1, [3.25, 0, 0], [5.0, 0, 0])
-	# states[72] = State(72, 73, "dist",  dist_gate_close,   1, 1, t, gate_params1, None, None)
-	# states[73] = State(73, 81, "dist",  exit_thrs,    0, 0, p, None, [dist_egw, 0, 0], [dist_egw, 0, 0])
-
-	# states[80] = State(80, 81, "dist",  dist_gate_blind,   0, 0, p, None, [1.5, -0.25, 0], [0.7, -2.75, 0])
-	# states[81] = State(81, 82, "wp",    None,              0, 1, p, gate_params1, [0.9, -0.5, -0.3], [0.7, -2.75, 0])
-	# states[82] = State(82, 83, "dist",  dist_gate_close,   1, 1, t, gate_params1, None, None)
-	# states[83] = State(83, 70, "dist",  exit_thrs,    0, 0, p, None, [dist_egw, 0, 0], [dist_egw, 0, 0])
+	states[49] = State(29, 30, "dist",  dist_gate_blind,   0, 0, 0, 0, p, None,           gate_1_test.look_pos,			gate_1.pos,         None)                # Move and Look for gate
 	
+	states[50] = State(50, 51, "wp",    None,              0, 0, 1, 0, p, gate_params1,   gate_1_test.look_pos,			gate_1.pos,         gate_1)              # Move and Look for gate
+	states[51] = State(51, 52, "dist",  dist_gate_close,   1, 0, 1, 0, t, gate_params1,   gate_1_test.pos,				gate_1.pos,         gate_1)              # move through gate until cant see it
+	states[52] = State(52, 53, "dist",  exit_thrs,         0, 1, 0, 0, p, None,           gate_1.exit_pos,        		gate_1.exit_pos,    None)                # Move through gate
+	states[53] = State(53, 60, "dist",  dist_gate_blind,   0, 0, 0, 0, p, None,           turn_pos_1,             		gate_2.pos,         None)                # Turn around manuever
+
+
+	states[60] = State(60, 61, "wp",    None,              0, 0, 1, 0, p, gate_params2,   gate_2.look_pos,        gate_2.pos,         gate_2)              # Move and Look for gate
+	states[61] = State(61, 62, "dist",  dist_gate_close,   1, 0, 1, 1, t, gate_params2,   gate_2.pos,             gate_2.pos,         gate_2)              # move through gate until cant see it
+	states[62] = State(62, 63, "dist",  exit_thrs,         0, 1, 0, 0, p, None,           gate_2.exit_pos,        gate_2.exit_pos,    None)                # Move through gate
+	states[63] = State(63, 50, "dist",  dist_gate_blind,   0, 0, 0, 0, p, None,           turn_pos_2,             gate_1.pos,         None)                # Turn around manuever
+
+
+
 
 	# End states
-	# states[90] = State(90, 91, "bebop", cr.Bebop.LANDING,  0, 0, 0, o, None, None, None, None)      # land
-	states[98] = State(98, 99, "bebop", cr.Bebop.LANDED,   0, 0, 0, o, None, None, None, None)      # landed
-	states[99] = State(99, 99, "time", 1000.0,   0, 0, 0, o, None, None, None, None)      # end state
+	states[98] = State(98, 99, "bebop", 	cr.Bebop.LANDED,   0, 0, 0, 0, o, None, None, None, None)      # landed
+	states[99] = State(99, 99, "time", 				 1000.0,   0, 0, 0, 0, o, None, None, None, None)      # end state
 	
 
 
